@@ -27,7 +27,6 @@ app = FastAPI(title="Ring Face Relief Designer")
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=500)
     preset: str = Field(default=prompts.DEFAULT_PRESET)
-    n_candidates: int = Field(default=4, ge=1, le=8)
     seed: Optional[int] = None
 
 
@@ -116,7 +115,10 @@ def generate(req: GenerateRequest):
         gen_w = int(round(gen_long_edge * config.FACE_WIDTH_MM / config.FACE_HEIGHT_MM))
 
     try:
-        raw_images = provider.generate(full_prompt, gen_w, gen_h, req.n_candidates, req.seed)
+        # Always request exactly one image per call -- each call is a real,
+        # billed API request, and the UI lets a user add more one at a time
+        # (via the same "Generate" button) rather than forcing a batch.
+        raw_images = provider.generate(full_prompt, gen_w, gen_h, 1, req.seed)
     except RuntimeError as exc:
         raise HTTPException(502, str(exc))
 

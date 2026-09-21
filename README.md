@@ -3,10 +3,13 @@
 Type a natural-language description of a design, get a manufacturable raised-relief
 heightmap for a fixed, flat signet ring face, and preview it in 3D as polished metal.
 
-An AI image model (OpenAI's `gpt-image-1`, or a built-in offline mock) only ever produces
-a **2D image**. All geometry, manufacturing rules (minimum feature size, edge margins,
-quantization), and the weight/volume estimate are deterministic code in `app/processing.py`
-— no text-to-3D model is used anywhere.
+An AI image model (OpenAI's `gpt-image-2.5-flare`, or a built-in offline mock) only ever
+produces a **2D image**. All geometry, manufacturing rules (minimum feature size, edge
+margins, quantization), and the weight/volume estimate are deterministic code in
+`app/processing.py` — no text-to-3D model is used anywhere.
+
+Each click of "Generate" makes exactly **one** image (one billed API call) and adds it to
+the gallery — there's no hidden batching. Click it again to add another for comparison.
 
 ## Quick start
 
@@ -20,8 +23,9 @@ cp .env.example .env   # defaults to IMAGE_PROVIDER=mock, no API key needed
 uvicorn app.main:app --reload --port 8420
 ```
 
-Open http://127.0.0.1:8420 — type a description, click **Generate candidates**, pick one,
-and tweak the sliders. Everything works fully offline with the mock provider.
+Open http://127.0.0.1:8420 — type a description, click **Generate image** (once per
+candidate you want), pick one, and tweak the sliders. Everything works fully offline
+with the mock provider.
 
 Run the test suite:
 
@@ -29,22 +33,26 @@ Run the test suite:
 pytest -q
 ```
 
-## Using real AI generation (OpenAI gpt-image-1)
+## Using real AI generation (OpenAI GPT Image 2.5)
 
-1. Get an API key at https://platform.openai.com/api-keys. Note: `gpt-image-1` requires
-   your OpenAI organization to complete identity verification before it will generate
+1. Get an API key at https://platform.openai.com/api-keys. Note: OpenAI's image models
+   require your organization to complete identity verification before they will generate
    images (Settings → Organization → General on platform.openai.com) — if generation
    fails with a permissions/access error, this is almost always why.
 2. In `.env`: set `IMAGE_PROVIDER=openai` and `OPENAI_API_KEY=...`
 3. Restart the server.
 
-`OPENAI_IMAGE_MODEL` defaults to `gpt-image-1`; `OPENAI_IMAGE_QUALITY` defaults to
-`medium` (`low`/`medium`/`high`/`auto` — higher costs more and is slower, useful once
-you've narrowed down a design and want a sharper final candidate). To add another
-provider, implement `ImageProvider` in `app/providers/` (see `app/providers/base.py`)
-and wire it into `get_provider()`.
+`OPENAI_IMAGE_MODEL` defaults to `gpt-image-2.5-flare` (cheaper/faster of the two current
+GPT Image 2.5 variants; `gpt-image-2.5-sunburst` is the premium/higher-fidelity option at
+the same per-token price, but tends to spend more tokens for more detail). **Do not use
+`gpt-image-1`** — OpenAI has deprecated it, shutting down Dec 1, 2026.
 
-Note: `gpt-image-1`'s API has a fixed set of output sizes (1024x1024, 1536x1024,
+`OPENAI_IMAGE_QUALITY` defaults to `medium` (`low`/`medium`/`high`/`xhigh`/`max`/`auto` —
+each step up costs more and is slower; `low` is the single biggest cost lever if you're
+optimizing for price over polish). To add another provider, implement `ImageProvider` in
+`app/providers/` (see `app/providers/base.py`) and wire it into `get_provider()`.
+
+Note: OpenAI's image API has a fixed set of output sizes (1024x1024, 1536x1024,
 1024x1536) and no seed parameter — `app/providers/openai_provider.py` picks whichever
 supported size is closest to the face's aspect ratio, and the existing cover-fit-resize
 step in `/api/generate` crops it to the exact aspect ratio afterwards. The `seed` field
@@ -66,8 +74,10 @@ constants automatically. No other code changes needed.
 ## How it works
 
 1. **Generate** (`POST /api/generate`): builds a locked prompt from a style preset +
-   your text, asks the image provider for `n_candidates` images, cover-fits each to the
-   face aspect ratio, and caches them on disk as candidates.
+   your text, asks the image provider for exactly one image, cover-fits it to the face
+   aspect ratio, and caches it on disk as a candidate. Call it again (e.g. clicking
+   "Generate" again in the UI) to add another candidate to the gallery — generation is
+   never batched, so cost per click is predictable.
 2. **Process** (`POST /api/process`, pure functions in `app/processing.py`): grayscale →
    optional invert/gamma/contrast → Gaussian blur → normalize → quantize to N levels →
    enforce minimum feature size (morphological open/close + small-component removal) →
@@ -108,14 +118,14 @@ survives the processing pipeline well, not just so it looks good on its own:
 - **No text/letters/watermark/border/frame**, since (a) diffusion models render text
   poorly at this scale and (b) our processing never attempts OCR/text-cleanup.
 
-Note: OpenAI's Images API (`gpt-image-1`) has no `negative_prompt` input, so all "avoid X"
-guidance above is baked directly into the positive prompt string rather than a separate
-negative-prompt field.
+Note: OpenAI's Images API has no `negative_prompt` input, so all "avoid X" guidance above
+is baked directly into the positive prompt string rather than a separate negative-prompt
+field.
 
 If your description mentions text/lettering (checked with a simple keyword list — "text",
 "letters", "name", "monogram", etc.), the report includes a warning that this MVP doesn't
 support legible text on the relief. This is a constraint of the *processing pipeline*, not
-the image model: `gpt-image-1` is actually quite good at rendering legible text, but any
+the image model: OpenAI's image models are actually quite good at rendering legible text, but any
 text it draws gets flattened/quantized/min-feature-filtered along with everything else and
 reliably comes out as illegible blobs once converted to relief — so the prompt templates
 explicitly ask for none, and no attempt is made to strip or repair it if it appears anyway.
@@ -130,7 +140,8 @@ report. Useful for scanned line art, logos, or photos with clear silhouettes.
 ## API
 
 - `GET /api/config` — face/relief constants and presets, so the frontend never hardcodes them.
-- `POST /api/generate {prompt, preset, n_candidates?, seed?}` → candidate ids + thumbnail URLs.
+- `POST /api/generate {prompt, preset, seed?}` → one candidate id + thumbnail URL (always
+  exactly one image per call — call it again to add another candidate).
 - `POST /api/upload` (multipart `file`) → one candidate id + thumbnail URL, from a user photo.
 - `POST /api/process {candidate_id, invert?, gamma?, contrast?, blur_mm?, levels?, min_feature_mm?, relief_height_mm?}`
   → preview/heightmap/params URLs + manufacturability report. Never calls the image model.
@@ -153,18 +164,19 @@ Filesystem only, `./data/designs/<uuid>/` — no database, no auth. Each candida
 ## Assumptions made
 
 - A generated **candidate's id doubles as the eventual design id** — `/api/generate`
-  returns 4 (by default) separate design folders up front, one per candidate, rather than
-  a batch id you then index into. This is what makes "re-processing never re-calls the
-  image model" simple: the candidate image is just sitting in that folder already.
+  creates one design folder per call (each call = exactly one image = one billed API
+  request, by design, to keep cost predictable), rather than a batch id you then index
+  into. This is what makes "re-processing never re-calls the image model" simple: the
+  candidate image is just sitting in that folder already.
 - The edge-margin **feather is intentionally continuous** even when `levels >= 2`
   (tiered/quantized mode) — the spec asks for a 0.3mm feather, which is inherently a
   ramp, not a hard cutoff. Only the *interior* (inset past margin+feather) is guaranteed
   to have exactly N discrete levels; this is covered by `tests/test_processing.py`.
 - Generated images are requested at the face aspect ratio, snapped to whichever of
-  `gpt-image-1`'s fixed output sizes (1024x1024 / 1536x1024 / 1024x1536) is closest,
-  then cover-fit resized/cropped to the exact heightmap pixel size — rather than
-  requesting the exact (odd, e.g. 700x600) heightmap resolution directly, which the API
-  doesn't support anyway.
+  OpenAI's fixed output sizes (1024x1024 / 1536x1024 / 1024x1536) is closest, then
+  cover-fit resized/cropped to the exact heightmap pixel size — rather than requesting
+  the exact (odd, e.g. 700x600) heightmap resolution directly, which the API doesn't
+  support anyway.
 - No path traversal protection was needed beyond validating design ids are the uuid4 hex
   strings we generate ourselves (`storage._safe_id`), since there's no auth/multi-tenant
   concern in this MVP.

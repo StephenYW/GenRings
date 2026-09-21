@@ -46,8 +46,8 @@ STATIC_DIR = BASE_DIR / "static"
 # --- Image generation provider ---------------------------------------------------
 IMAGE_PROVIDER = os.environ.get("IMAGE_PROVIDER", "mock").lower()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_IMAGE_MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-1")
-OPENAI_IMAGE_QUALITY = os.environ.get("OPENAI_IMAGE_QUALITY", "medium")  # low | medium | high | auto
+OPENAI_IMAGE_MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-2.5-flare")
+OPENAI_IMAGE_QUALITY = os.environ.get("OPENAI_IMAGE_QUALITY", "medium")  # low | medium | high | xhigh | max | auto
 
 # Candidate images are generated somewhat larger than the heightmap for
 # quality, then cover-fit resized down to the face aspect ratio.

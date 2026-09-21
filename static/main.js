@@ -202,10 +202,12 @@ async function fetchConfig() {
 }
 
 async function generateCandidates(prompt, preset) {
+  // Backend always generates exactly one image per call (each call is a
+  // real, billed API request) -- click "Generate" again to add another.
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, preset, n_candidates: 4 }),
+    body: JSON.stringify({ prompt, preset }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -405,18 +407,21 @@ function wireUI(cfg) {
     const preset = document.getElementById("preset").value;
     const btn = document.getElementById("generateBtn");
     btn.disabled = true;
-    setStatus("generateStatus", "Generating candidates...");
+    setStatus("generateStatus", "Generating 1 image...");
     try {
       const result = await generateCandidates(prompt, preset);
-      state.candidates = result.candidates;
-      renderGallery(result.candidates);
-      setStatus("generateStatus", `${result.candidates.length} candidates ready. Pick one below.`);
+      // Each click generates exactly one image (one billed API call) and
+      // adds it to the gallery -- click again to add more for comparison.
+      state.candidates = [...state.candidates, ...result.candidates];
+      renderGallery(state.candidates);
+      setStatus("generateStatus", "Image added below. Click Generate again for another, or pick one to preview.");
       if (result.warnings && result.warnings.length) {
         setStatus("generateStatus", result.warnings.join(" "));
       }
       if (result.candidates.length) {
-        const firstImg = document.querySelector("#gallery img");
-        selectCandidate(result.candidates[0].candidate_id, firstImg);
+        const newCandidate = result.candidates[0];
+        const newImg = document.querySelector(`#gallery img[data-candidate-id="${newCandidate.candidate_id}"]`);
+        selectCandidate(newCandidate.candidate_id, newImg);
       }
     } catch (err) {
       console.error(err);
