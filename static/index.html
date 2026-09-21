@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ring Face Relief Designer</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <aside id="panel">
+      <h1>Ring Face Relief Designer</h1>
+
+      <section>
+        <label for="prompt">Design description</label>
+        <textarea id="prompt" rows="3" placeholder="e.g. a howling wolf under a crescent moon"></textarea>
+
+        <label for="preset">Style preset</label>
+        <select id="preset"></select>
+
+        <button id="generateBtn">Generate candidates</button>
+        <div id="generateStatus" class="status"></div>
+
+        <div class="or-divider">or</div>
+        <label for="photoUploadInput" class="upload-label">Upload your own photo/artwork</label>
+        <input type="file" id="photoUploadInput" accept="image/png,image/jpeg,image/webp" />
+      </section>
+
+      <section>
+        <label>Candidates</label>
+        <div id="gallery" class="gallery"></div>
+      </section>
+
+      <section id="paramsSection" hidden>
+        <label>Relief height (mm) <span id="reliefHeightVal"></span></label>
+        <input type="range" id="reliefHeight" min="0.1" max="0.4" step="0.01" value="0.25" />
+
+        <label>Levels (0 = continuous) <span id="levelsVal"></span></label>
+        <input type="range" id="levels" min="0" max="8" step="1" value="4" />
+
+        <label>Blur (mm) <span id="blurVal"></span></label>
+        <input type="range" id="blur" min="0" max="0.6" step="0.02" value="0" />
+
+        <label>Min feature size (mm) <span id="minFeatureVal"></span></label>
+        <input type="range" id="minFeature" min="0.1" max="0.8" step="0.01" value="0.25" />
+
+        <label class="checkbox-row"><input type="checkbox" id="invert" /> Invert (raise background instead)</label>
+
+        <hr />
+
+        <label>Preview exaggeration <span id="exaggerationVal"></span> <em>(display only)</em></label>
+        <input type="range" id="exaggeration" min="1" max="6" step="0.1" value="3" />
+
+        <div id="processStatus" class="status"></div>
+      </section>
+
+      <section id="reportSection" hidden>
+        <label>Report</label>
+        <div id="reportBox" class="report"></div>
+        <div id="warningsBox" class="warnings"></div>
+        <div class="downloads">
+          <a id="downloadHeightmap" href="#" download>Download 16-bit heightmap.png</a>
+          <a id="downloadParams" href="#" download>Download params.json</a>
+          <a id="downloadStl" href="#" download>Download STL (watertight, relief + base slab)</a>
+        </div>
+      </section>
+    </aside>
+
+    <main id="viewer">
+      <canvas id="three-canvas"></canvas>
+    </main>
+  </div>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
