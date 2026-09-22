@@ -37,6 +37,25 @@ SILVER_DENSITY_G_CM3 = 10.49
 # --- STL export (stretch milestone) ---------------------------------------------------
 BASE_THICKNESS_MM = 1.0
 
+# --- 3D preview ring geometry (visual only -- not a manufacturing file) ---------------
+# The exported heightmap/STL only ever describe the flat face (above); these
+# constants exist purely so the viewer can render that face attached to a
+# plausible ring band/shank, to make the face's small real-world scale
+# obvious. A manufacturer determines actual shank/finger-size geometry
+# separately -- only the face relief ships to them.
+RING_DIAMETER_MM = 18.0       # finger-hole diameter, ~US size 8
+RING_BAND_THICKNESS_MM = 1.8  # band tube diameter
+
+# --- Interactive crop (pan/zoom) ---------------------------------------------------
+# How much of the source image maps onto the face is adjustable per design
+# (see /api/process crop_* params) rather than fixed at generation time, so
+# a user can pick/zoom/pan without re-calling the image model.
+CROP_ZOOM_MIN = 1.0
+CROP_ZOOM_MAX = 6.0
+# Cap on the stored full-resolution candidate image so pan/zoom stays sharp
+# without keeping huge uploaded photos on disk uncompressed.
+MAX_FULL_IMAGE_DIM_PX = 1600
+
 # --- Storage ---------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data" / "designs"

@@ -12,7 +12,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from app import config, prompts, storage
-from app.imaging import cover_fit_resize
+from app.imaging import cap_max_dimension, cover_fit_resize
 from app.processing import ProcessParams, process_image
 from app.providers import get_provider
 
@@ -52,6 +52,12 @@ class ProcessRequest(BaseModel):
     levels: int = 0
     min_feature_mm: float = config.MIN_FEATURE_MM
     relief_height_mm: float = 0.25
+    # Which part of the full source image maps onto the face. zoom=1,
+    # offset=(0,0) is the default centered cover-fit crop; the frontend
+    # cropper lets a user adjust these without re-calling the image model.
+    crop_zoom: float = Field(default=1.0, ge=config.CROP_ZOOM_MIN, le=config.CROP_ZOOM_MAX)
+    crop_offset_x: float = Field(default=0.0, ge=-1.0, le=1.0)
+    crop_offset_y: float = Field(default=0.0, ge=-1.0, le=1.0)
 
 
 class ReportOut(BaseModel):
@@ -84,6 +90,10 @@ def get_config():
         "edge_margin_mm": config.EDGE_MARGIN_MM,
         "edge_feather_mm": config.EDGE_FEATHER_MM,
         "min_feature_mm": config.MIN_FEATURE_MM,
+        "ring_diameter_mm": config.RING_DIAMETER_MM,
+        "ring_band_thickness_mm": config.RING_BAND_THICKNESS_MM,
+        "crop_zoom_min": config.CROP_ZOOM_MIN,
+        "crop_zoom_max": config.CROP_ZOOM_MAX,
         "presets": {
             pid: {"label": p.label, "levels": p.levels, "blur_mm": p.blur_mm}
             for pid, p in prompts.PRESETS.items()
@@ -131,10 +141,13 @@ def generate(req: GenerateRequest):
 
     candidates = []
     for raw_img in raw_images:
-        fitted = cover_fit_resize(raw_img, config.HEIGHTMAP_WIDTH_PX, config.HEIGHTMAP_HEIGHT_PX)
+        # Keep the full image (not pre-cropped to the face aspect ratio) so
+        # the user can pan/zoom which part of it lands on the face later,
+        # via /api/process's crop_* params, without a re-generation call.
+        full_img = cap_max_dimension(raw_img, config.MAX_FULL_IMAGE_DIM_PX)
         design_id, d = storage.new_design_dir()
-        storage.save_rgb_png(d / "candidate.png", fitted)
-        thumb = storage.make_thumbnail(fitted)
+        storage.save_rgb_png(d / "candidate_full.png", full_img)
+        thumb = storage.make_thumbnail(full_img)
         storage.save_rgb_png(d / "thumbnail.png", thumb)
         storage.write_json(d / "meta.json", {
             "design_id": design_id,
@@ -174,11 +187,11 @@ async def upload_photo(file: UploadFile = File(...)):
         raise HTTPException(400, "Could not decode image file.")
 
     rgb = np.array(pil_img)
-    fitted = cover_fit_resize(rgb, config.HEIGHTMAP_WIDTH_PX, config.HEIGHTMAP_HEIGHT_PX)
+    full_img = cap_max_dimension(rgb, config.MAX_FULL_IMAGE_DIM_PX)
 
     design_id, d = storage.new_design_dir()
-    storage.save_rgb_png(d / "candidate.png", fitted)
-    thumb = storage.make_thumbnail(fitted)
+    storage.save_rgb_png(d / "candidate_full.png", full_img)
+    thumb = storage.make_thumbnail(full_img)
     storage.save_rgb_png(d / "thumbnail.png", thumb)
     storage.write_json(d / "meta.json", {
         "design_id": design_id,
@@ -199,7 +212,7 @@ async def upload_photo(file: UploadFile = File(...)):
 @app.post("/api/process", response_model=ProcessResponse)
 def process(req: ProcessRequest):
     d = storage.design_dir(req.candidate_id)
-    candidate_path = d / "candidate.png"
+    candidate_path = d / "candidate_full.png"
     if not candidate_path.exists():
         raise HTTPException(404, f"Unknown candidate_id '{req.candidate_id}'")
 
@@ -208,7 +221,18 @@ def process(req: ProcessRequest):
     bgr = cv2.imread(str(candidate_path), cv2.IMREAD_COLOR)
     if bgr is None:
         raise HTTPException(500, "Failed to read cached candidate image")
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    full_rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+    # Crop/zoom/pan happens here, every call, against the cached full image
+    # -- never against the image model.
+    rgb = cover_fit_resize(
+        full_rgb,
+        config.HEIGHTMAP_WIDTH_PX,
+        config.HEIGHTMAP_HEIGHT_PX,
+        zoom=req.crop_zoom,
+        offset_x=req.crop_offset_x,
+        offset_y=req.crop_offset_y,
+    )
 
     params = ProcessParams(
         invert=req.invert,
@@ -242,6 +266,9 @@ def process(req: ProcessRequest):
             "px_per_mm": config.PX_PER_MM,
             "face_width_mm": config.FACE_WIDTH_MM,
             "face_height_mm": config.FACE_HEIGHT_MM,
+            "crop_zoom": req.crop_zoom,
+            "crop_offset_x": req.crop_offset_x,
+            "crop_offset_y": req.crop_offset_y,
         },
         "report": {
             "coverage_percent": report.coverage_percent,
@@ -271,6 +298,12 @@ def process(req: ProcessRequest):
 @app.get("/api/designs/{design_id}/thumbnail.png")
 def get_thumbnail(design_id: str):
     return _serve_file(design_id, "thumbnail.png", "image/png")
+
+
+@app.get("/api/designs/{design_id}/full.png")
+def get_full(design_id: str):
+    """The uncropped source image, for the interactive crop/pan/zoom UI."""
+    return _serve_file(design_id, "candidate_full.png", "image/png")
 
 
 @app.get("/api/designs/{design_id}/heightmap.png")

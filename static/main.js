@@ -16,7 +16,15 @@ const state = {
   gridNX: 400,
   gridNY: 340,
   debounceTimer: null,
+  // Which part of the full source image maps onto the face -- mirrors
+  // app/imaging.py's cover_fit_resize(zoom, offset_x, offset_y) exactly, so
+  // the on-screen crop box previews precisely what the backend will crop.
+  crop: { zoom: 1.0, offsetX: 0.0, offsetY: 0.0, naturalW: 0, naturalH: 0 },
 };
+
+function clamp(v, lo, hi) {
+  return Math.min(hi, Math.max(lo, v));
+}
 
 // ---------------------------------------------------------------------------
 // Three.js scene
@@ -41,13 +49,21 @@ function initThree(cfg) {
 
   const aspect = viewer.clientWidth / viewer.clientHeight;
   camera = new THREE.PerspectiveCamera(35, aspect, 0.1, 500);
-  const maxDim = Math.max(cfg.face_width_mm, cfg.face_height_mm);
-  camera.position.set(0, maxDim * 1.1, maxDim * 1.35);
+  // Frame the whole ring (band + face), not just the face, so the face's
+  // small real-world scale relative to the band is visually obvious. A
+  // steep, near-top-down default angle (like a product photo looking down
+  // into the ring) keeps the band's far side from dominating the view.
+  const ringSpan = cfg.ring_diameter_mm + cfg.ring_band_thickness_mm * 2;
+  const maxDim = Math.max(cfg.face_width_mm, cfg.face_height_mm, ringSpan);
+  const targetY = -cfg.ring_diameter_mm * 0.18;
+  const targetZ = cfg.ring_diameter_mm * 0.22;
+  camera.position.set(0, targetY + maxDim * 1.85, targetZ + maxDim * 1.3);
+  camera.lookAt(0, targetY, targetZ);
 
   controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 0, 0);
+  controls.target.set(0, targetY, targetZ);
   controls.enableDamping = true;
-  controls.minDistance = maxDim * 0.6;
+  controls.minDistance = maxDim * 0.5;
   controls.maxDistance = maxDim * 6;
   controls.maxPolarAngle = Math.PI * 0.49;
 
@@ -57,7 +73,7 @@ function initThree(cfg) {
   scene.add(keyLight);
   scene.add(new THREE.AmbientLight(0xffffff, 0.15));
 
-  buildBezel(cfg);
+  buildRing(cfg);
   buildReliefMesh(cfg);
 
   onResize();
@@ -80,22 +96,47 @@ function onResize() {
 
 const METAL_COLOR = 0xd7d7da; // polished silver
 
-function buildBezel(cfg) {
+/**
+ * A stylized signet ring: a flat rimmed "table" (unchanged from the
+ * original flat-plaque viewer -- the relief mesh sits on it exactly as
+ * before, at y=0) fused to a torus band representing the shank. This is a
+ * proportional visual preview only, not a manufacturing model of the shank
+ * -- the exported heightmap/STL only ever describe the flat face; a
+ * manufacturer determines actual shank/finger-size geometry separately.
+ */
+function buildRing(cfg) {
   const rim = 1.6;
   const slabThickness = 1.6;
-  const geo = new THREE.BoxGeometry(
+  const tableGeo = new THREE.BoxGeometry(
     cfg.face_width_mm + rim * 2,
     slabThickness,
     cfg.face_height_mm + rim * 2
   );
-  const mat = new THREE.MeshStandardMaterial({
+  const tableMat = new THREE.MeshStandardMaterial({
     color: METAL_COLOR,
     metalness: 1.0,
     roughness: 0.22,
   });
-  const slab = new THREE.Mesh(geo, mat);
-  slab.position.y = -slabThickness / 2 - 0.001;
-  scene.add(slab);
+  const table = new THREE.Mesh(tableGeo, tableMat);
+  table.position.y = -slabThickness / 2 - 0.001;
+  scene.add(table);
+
+  const bandRadius = cfg.ring_diameter_mm / 2;
+  const tubeRadius = cfg.ring_band_thickness_mm / 2;
+  const bandGeo = new THREE.TorusGeometry(bandRadius, tubeRadius, 24, 128);
+  bandGeo.rotateX(Math.PI / 2); // lay the band flat, hole facing up (Y)
+  const bandMat = new THREE.MeshStandardMaterial({
+    color: METAL_COLOR,
+    metalness: 1.0,
+    roughness: 0.3,
+  });
+  const band = new THREE.Mesh(bandGeo, bandMat);
+  // Position the band so the point on its circle FARTHEST from the camera
+  // sits under the table's center (hidden by it), and the near arc curves
+  // out toward the viewer in front of/below the table -- reading as the
+  // shank coming toward you, not a handle rising up behind it.
+  band.position.set(0, -slabThickness - tubeRadius, bandRadius);
+  scene.add(band);
 }
 
 function buildReliefMesh(cfg) {
@@ -248,6 +289,119 @@ function loadImageToCanvas(url) {
 }
 
 // ---------------------------------------------------------------------------
+// Crop / pan / zoom -- mirrors app/imaging.py's cover_fit_resize math
+// ---------------------------------------------------------------------------
+
+/** Same math as cover_fit_resize, in normalized (0..1) image-fraction units. */
+function computeCropGeometry(naturalW, naturalH, faceW, faceH, zoom) {
+  const targetAspect = faceW / faceH;
+  const srcAspect = naturalW / naturalH;
+  let baseWNorm, baseHNorm;
+  if (srcAspect > targetAspect) {
+    baseHNorm = 1.0;
+    baseWNorm = targetAspect / srcAspect;
+  } else {
+    baseWNorm = 1.0;
+    baseHNorm = srcAspect / targetAspect;
+  }
+  const z = Math.max(1.0, zoom);
+  const cropWNorm = baseWNorm / z;
+  const cropHNorm = baseHNorm / z;
+  const maxOffsetXNorm = Math.max(0, (1 - cropWNorm) / 2);
+  const maxOffsetYNorm = Math.max(0, (1 - cropHNorm) / 2);
+  return { cropWNorm, cropHNorm, maxOffsetXNorm, maxOffsetYNorm };
+}
+
+function renderCropBox() {
+  const { naturalW, naturalH } = state.crop;
+  if (!naturalW || !naturalH || !state.cfg) return;
+  const { cropWNorm, cropHNorm, maxOffsetXNorm, maxOffsetYNorm } = computeCropGeometry(
+    naturalW, naturalH, state.cfg.face_width_mm, state.cfg.face_height_mm, state.crop.zoom
+  );
+  const centerXNorm = 0.5 + state.crop.offsetX * maxOffsetXNorm;
+  const centerYNorm = 0.5 + state.crop.offsetY * maxOffsetYNorm;
+  const box = document.getElementById("cropperBox");
+  box.style.left = `${(centerXNorm - cropWNorm / 2) * 100}%`;
+  box.style.top = `${(centerYNorm - cropHNorm / 2) * 100}%`;
+  box.style.width = `${cropWNorm * 100}%`;
+  box.style.height = `${cropHNorm * 100}%`;
+}
+
+function loadCropperImage(designId) {
+  return new Promise((resolve, reject) => {
+    const img = document.getElementById("cropperImage");
+    const container = document.getElementById("cropperContainer");
+    img.onload = () => {
+      state.crop.naturalW = img.naturalWidth;
+      state.crop.naturalH = img.naturalHeight;
+      state.crop.zoom = 1.0;
+      state.crop.offsetX = 0.0;
+      state.crop.offsetY = 0.0;
+      // Match the container's aspect ratio to the image so container
+      // fractions map 1:1 to image-normalized fractions (clamped so a
+      // very extreme photo aspect can't blow up the panel layout).
+      const aspect = clamp(img.naturalWidth / img.naturalHeight, 0.4, 2.5);
+      container.style.aspectRatio = `${aspect}`;
+      document.getElementById("cropZoom").value = "1";
+      document.getElementById("cropZoomVal").textContent = "1.00x";
+      renderCropBox();
+      resolve();
+    };
+    img.onerror = reject;
+    img.src = `/api/designs/${designId}/full.png?t=${Date.now()}`;
+  });
+}
+
+function wireCropDrag() {
+  const box = document.getElementById("cropperBox");
+  const container = document.getElementById("cropperContainer");
+  let dragging = false;
+  let startClientX = 0, startClientY = 0;
+  let startOffsetX = 0, startOffsetY = 0;
+
+  box.addEventListener("pointerdown", (e) => {
+    dragging = true;
+    box.setPointerCapture(e.pointerId);
+    startClientX = e.clientX;
+    startClientY = e.clientY;
+    startOffsetX = state.crop.offsetX;
+    startOffsetY = state.crop.offsetY;
+  });
+
+  box.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const rect = container.getBoundingClientRect();
+    const dxNorm = (e.clientX - startClientX) / rect.width;
+    const dyNorm = (e.clientY - startClientY) / rect.height;
+    const { maxOffsetXNorm, maxOffsetYNorm } = computeCropGeometry(
+      state.crop.naturalW, state.crop.naturalH,
+      state.cfg.face_width_mm, state.cfg.face_height_mm, state.crop.zoom
+    );
+    // Below this there's negligible real room to pan (can happen at zoom=1
+    // when the source is already very close to the face aspect ratio) --
+    // dividing by a near-zero max would amplify a tiny mouse move into an
+    // instant snap to the clamped edge, which feels like a broken drag.
+    const MIN_PANNABLE_NORM = 0.01;
+    state.crop.offsetX = clamp(
+      startOffsetX + (maxOffsetXNorm > MIN_PANNABLE_NORM ? dxNorm / maxOffsetXNorm : 0), -1, 1
+    );
+    state.crop.offsetY = clamp(
+      startOffsetY + (maxOffsetYNorm > MIN_PANNABLE_NORM ? dyNorm / maxOffsetYNorm : 0), -1, 1
+    );
+    renderCropBox();
+  });
+
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    try { box.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
+    debouncedRefresh();
+  };
+  box.addEventListener("pointerup", endDrag);
+  box.addEventListener("pointercancel", endDrag);
+}
+
+// ---------------------------------------------------------------------------
 // UI wiring
 // ---------------------------------------------------------------------------
 
@@ -260,6 +414,9 @@ function currentParams() {
     levels: parseInt(document.getElementById("levels").value, 10),
     min_feature_mm: parseFloat(document.getElementById("minFeature").value),
     relief_height_mm: parseFloat(document.getElementById("reliefHeight").value),
+    crop_zoom: state.crop.zoom,
+    crop_offset_x: state.crop.offsetX,
+    crop_offset_y: state.crop.offsetY,
   };
 }
 
@@ -355,17 +512,27 @@ function renderGallery(candidates) {
   }
 }
 
-function selectCandidate(candidateId, imgEl) {
+async function selectCandidate(candidateId, imgEl) {
   state.selectedCandidateId = candidateId;
   document.querySelectorAll("#gallery img").forEach((el) => el.classList.remove("selected"));
   if (imgEl) imgEl.classList.add("selected");
+  document.getElementById("cropSection").hidden = false;
   document.getElementById("paramsSection").hidden = false;
   applyPresetDefaults(state.cfg);
+  await loadCropperImage(candidateId);
   refreshFromBackend();
 }
 
 function wireUI(cfg) {
   populatePresets(cfg);
+  wireCropDrag();
+
+  document.getElementById("cropZoom").addEventListener("input", (e) => {
+    state.crop.zoom = parseFloat(e.target.value);
+    document.getElementById("cropZoomVal").textContent = state.crop.zoom.toFixed(2) + "x";
+    renderCropBox();
+  });
+  document.getElementById("cropZoom").addEventListener("change", debouncedRefresh);
 
   ["reliefHeight", "levels", "blur", "minFeature"].forEach((id) => {
     wireSliderDisplay(id);

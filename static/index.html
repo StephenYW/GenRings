@@ -40,6 +40,17 @@
         <div id="gallery" class="gallery"></div>
       </section>
 
+      <section id="cropSection" hidden>
+        <label>Crop &amp; position on face</label>
+        <p class="hint">Drag the box to choose what's centered on the ring face. Zoom to include more or less of the image.</p>
+        <div id="cropperContainer">
+          <img id="cropperImage" alt="Full source image" />
+          <div id="cropperBox"></div>
+        </div>
+        <label>Zoom <span id="cropZoomVal"></span></label>
+        <input type="range" id="cropZoom" min="1" max="6" step="0.05" value="1" />
+      </section>
+
       <section id="paramsSection" hidden>
         <label>Relief height (mm) <span id="reliefHeightVal"></span></label>
         <input type="range" id="reliefHeight" min="0.1" max="0.4" step="0.01" value="0.25" />

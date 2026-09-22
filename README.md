@@ -11,6 +11,12 @@ margins, quantization), and the weight/volume estimate are deterministic code in
 Each click of "Generate" makes exactly **one** image (one billed API call) and adds it to
 the gallery — there's no hidden batching. Click it again to add another for comparison.
 
+The 3D preview renders the face attached to a small signet ring band so its real-world
+scale is obvious — the engraved area is genuinely small (14mm x 12mm by default), and the
+minimum-feature/edge-margin rules exist specifically because fine detail doesn't survive
+manufacturing at that size. Once you pick a candidate, drag/zoom a crop box over the full
+source image to choose exactly what lands on the face — see "Crop, pan & zoom" below.
+
 ## Quick start
 
 ```bash
@@ -90,7 +96,34 @@ constants automatically. No other code changes needed.
    into a ~400x340 vertex grid, displaces a plane, and recomputes normals — polished
    with `MeshStandardMaterial` (metalness 1, roughness 0.08) under `RoomEnvironment`
    lighting. The exaggeration slider only scales the *displayed* mesh; exports always
-   use the true (max 0.4mm) relief height.
+   use the true (max 0.4mm) relief height. The face plate sits on a stylized torus
+   band (see "The 3D ring preview" below) so its small scale reads clearly.
+
+### Crop, pan & zoom
+
+A candidate's **full, uncropped** source image is kept on disk (`candidate_full.png`,
+capped to `MAX_FULL_IMAGE_DIM_PX` = 1600px on the long edge) — the face only ever shows
+a crop of it, chosen interactively:
+
+- **Zoom** (1x–6x) shrinks the cropped region, so more of the image maps onto the small
+  face at higher effective detail (useful once you've composed a design and want to
+  frame just the interesting part tightly).
+- **Drag the crop box** directly on the source image to pick what's centered on the face
+  (pan), independent of zoom.
+
+Both are sent as `crop_zoom`/`crop_offset_x`/`crop_offset_y` to `/api/process`, applied
+fresh against the cached full image every time (`app/imaging.py::cover_fit_resize`) —
+adjusting them never re-calls the image model, and the on-screen crop box is computed
+with the exact same math as the backend (`computeCropGeometry` in `main.js` mirrors
+`cover_fit_resize` in Python) so what you see is what gets cropped.
+
+### The 3D ring preview
+
+The viewer attaches the face to a torus band (`RING_DIAMETER_MM` = 18mm, a plausible
+finger size) purely so the face's real scale is obvious next to something recognizably
+ring-sized — **this is not a manufacturing model of the shank.** The exported heightmap
+and STL only ever describe the flat face; the manufacturer determines the actual
+band/shank/finger-size geometry separately and fuses or engraves the face pattern onto it.
 
 ### Style presets
 
@@ -143,11 +176,14 @@ report. Useful for scanned line art, logos, or photos with clear silhouettes.
 - `POST /api/generate {prompt, preset, seed?}` → one candidate id + thumbnail URL (always
   exactly one image per call — call it again to add another candidate).
 - `POST /api/upload` (multipart `file`) → one candidate id + thumbnail URL, from a user photo.
-- `POST /api/process {candidate_id, invert?, gamma?, contrast?, blur_mm?, levels?, min_feature_mm?, relief_height_mm?}`
-  → preview/heightmap/params URLs + manufacturability report. Never calls the image model.
+- `POST /api/process {candidate_id, invert?, gamma?, contrast?, blur_mm?, levels?, min_feature_mm?, relief_height_mm?, crop_zoom?, crop_offset_x?, crop_offset_y?}`
+  → preview/heightmap/params URLs + manufacturability report. Never calls the image model;
+  crop/zoom/pan is re-applied to the cached full image on every call.
 - `GET /api/designs/{id}/heightmap.png` — 16-bit grayscale PNG (0..65535 = 0..RELIEF_MAX_MM).
 - `GET /api/designs/{id}/preview.png` — 8-bit grayscale, used by the 3D viewer.
-- `GET /api/designs/{id}/params.json` — prompt, preset, seed, model, all processing params, report.
+- `GET /api/designs/{id}/full.png` — the uncropped source image, for the crop/pan/zoom UI.
+- `GET /api/designs/{id}/params.json` — prompt, preset, seed, model, all processing params
+  (crop params included), report.
 - `GET /api/designs/{id}/model.stl` — **(stretch)** watertight STL: base slab
   (`BASE_THICKNESS_MM` = 1.0mm) + relief, built from the 16-bit heightmap and verified
   watertight with `trimesh` in `tests/test_stl_export.py`. Grid is downsampled to a
@@ -157,9 +193,9 @@ report. Useful for scanned line art, logos, or photos with clear silhouettes.
 ## Storage
 
 Filesystem only, `./data/designs/<uuid>/` — no database, no auth. Each candidate
-(generated or uploaded) gets its own folder: `candidate.png` (raw), `thumbnail.png`,
-`meta.json` (prompt/preset/seed/provider), and after processing, `heightmap.png`,
-`preview.png`, `params.json`, and (on request) `model.stl`.
+(generated or uploaded) gets its own folder: `candidate_full.png` (the full, uncropped
+source image), `thumbnail.png`, `meta.json` (prompt/preset/seed/provider), and after
+processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `model.stl`.
 
 ## Assumptions made
 
@@ -173,10 +209,16 @@ Filesystem only, `./data/designs/<uuid>/` — no database, no auth. Each candida
   ramp, not a hard cutoff. Only the *interior* (inset past margin+feather) is guaranteed
   to have exactly N discrete levels; this is covered by `tests/test_processing.py`.
 - Generated images are requested at the face aspect ratio, snapped to whichever of
-  OpenAI's fixed output sizes (1024x1024 / 1536x1024 / 1024x1536) is closest, then
-  cover-fit resized/cropped to the exact heightmap pixel size — rather than requesting
-  the exact (odd, e.g. 700x600) heightmap resolution directly, which the API doesn't
-  support anyway.
+  OpenAI's fixed output sizes (1024x1024 / 1536x1024 / 1024x1536) is closest, and kept
+  in full (capped to `MAX_FULL_IMAGE_DIM_PX`) rather than immediately cropped — the
+  face-aspect-ratio crop happens per `/api/process` call instead, using the crop_*
+  params, so pan/zoom can be adjusted after the fact without a re-generation call.
+- The crop box's default (`zoom=1, offset=(0,0)`) reproduces the old fixed
+  cover-fit-and-crop behavior exactly, so an unadjusted candidate processes identically
+  to before this feature existed.
+- The 3D ring band (torus, `RING_DIAMETER_MM`/`RING_BAND_THICKNESS_MM`) is a
+  proportional visual aid only — picked to make the face's small scale legible, not
+  derived from any real ring-sizing standard or sent to a manufacturer.
 - No path traversal protection was needed beyond validating design ids are the uuid4 hex
   strings we generate ourselves (`storage._safe_id`), since there's no auth/multi-tenant
   concern in this MVP.
@@ -196,3 +238,5 @@ Filesystem only, `./data/designs/<uuid>/` — no database, no auth. Each candida
   content. That's expected; it exists purely so the app/tests work with zero setup.
 - The STL export downsamples the heightmap grid for a manageable file size/face count;
   it's a preview-quality mesh, not a full-resolution manufacturing file.
+- The 3D ring band is a stylized proportional preview (see "The 3D ring preview" above),
+  not a CAD-accurate shank — only the face relief is ever exported.
