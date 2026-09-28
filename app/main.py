@@ -52,6 +52,9 @@ class ProcessRequest(BaseModel):
     levels: int = 0
     min_feature_mm: float = config.MIN_FEATURE_MM
     relief_height_mm: float = 0.25
+    # Mirror the image left-right / top-bottom before it becomes the heightmap.
+    flip_h: bool = False
+    flip_v: bool = False
     # Which part of the full source image maps onto the face. zoom=1,
     # offset=(0,0) is the default centered cover-fit crop; the frontend
     # cropper lets a user adjust these without re-calling the image model.
@@ -234,6 +237,11 @@ def process(req: ProcessRequest):
         offset_y=req.crop_offset_y,
     )
 
+    if req.flip_h:
+        rgb = np.ascontiguousarray(rgb[:, ::-1])
+    if req.flip_v:
+        rgb = np.ascontiguousarray(rgb[::-1])
+
     params = ProcessParams(
         invert=req.invert,
         gamma=req.gamma,
@@ -254,6 +262,8 @@ def process(req: ProcessRequest):
         **meta,
         "processing": {
             "invert": params.invert,
+            "flip_h": req.flip_h,
+            "flip_v": req.flip_v,
             "gamma": params.gamma,
             "contrast": params.contrast,
             "blur_mm": params.blur_mm,

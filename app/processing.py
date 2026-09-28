@@ -193,6 +193,36 @@ def edge_margin_mask(
     return mask.astype(np.float32)
 
 
+def outline_margin_mask(
+    height_px: int,
+    width_px: int,
+    outline_mm,
+    margin_mm: float,
+    feather_mm: float,
+    px_per_mm: int = config.PX_PER_MM,
+    face_width_mm: float = config.FACE_WIDTH_MM,
+    face_height_mm: float = config.FACE_HEIGHT_MM,
+) -> np.ndarray:
+    """
+    Like edge_margin_mask, but measured from an arbitrary face outline (list
+    of (x, z) mm points centred on the face's bounding box) instead of the
+    rectangle. 0 outside the outline and within margin_mm of it, ramping to 1
+    over feather_mm.
+    """
+    pts = np.array(
+        [
+            [(x / face_width_mm + 0.5) * (width_px - 1), (z / face_height_mm + 0.5) * (height_px - 1)]
+            for x, z in outline_mm
+        ],
+        dtype=np.float32,
+    )
+    inside = np.zeros((height_px, width_px), np.uint8)
+    cv2.fillPoly(inside, [np.round(pts).astype(np.int32)], 1)
+    dist_px = cv2.distanceTransform(inside, cv2.DIST_L2, 5)
+    mask = (dist_px - margin_mm * px_per_mm) / max(feather_mm * px_per_mm, 1e-6)
+    return np.clip(mask, 0.0, 1.0).astype(np.float32)
+
+
 def to_heightmap_16bit(gray01: np.ndarray, relief_height_mm: float, relief_max_mm: float = config.RELIEF_MAX_MM) -> np.ndarray:
     """gray01 in 0..1 -> uint16 array where 65535 == relief_max_mm."""
     relief_height_mm = float(np.clip(relief_height_mm, 0.0, relief_max_mm))
@@ -281,6 +311,10 @@ def process_image(img_rgb: np.ndarray, params: ProcessParams, contains_text_requ
     mask = edge_margin_mask(
         gray.shape[0], gray.shape[1], params.edge_margin_mm, params.edge_feather_mm
     )
+    if config.FACE_OUTLINE_MM:
+        mask = mask * outline_margin_mask(
+            gray.shape[0], gray.shape[1], config.FACE_OUTLINE_MM, params.edge_margin_mm, params.edge_feather_mm
+        )
     raised_before_margin = float((gray > config.RAISED_THRESHOLD).sum())
     gray_margined = gray * mask
     raised_after_margin = float((gray_margined > config.RAISED_THRESHOLD).sum())

@@ -1,7 +1,7 @@
 # Ring Face Relief Designer (MVP)
 
 Type a natural-language description of a design, get a manufacturable raised-relief
-heightmap for a fixed, flat signet ring face, and preview it in 3D as polished metal.
+heightmap for the top of a signet ring head, and preview it in 3D as polished metal.
 
 An AI image model (OpenAI's `gpt-image-2.5-flare`, or a built-in offline mock) only ever
 produces a **2D image**. All geometry, manufacturing rules (minimum feature size, edge
@@ -12,7 +12,7 @@ Each click of "Generate" makes exactly **one** image (one billed API call) and a
 the gallery — there's no hidden batching. Click it again to add another for comparison.
 
 The 3D preview renders the face attached to a small signet ring band so its real-world
-scale is obvious — the engraved area is genuinely small (14mm x 12mm by default), and the
+scale is obvious — the engraved area is genuinely small (about 14mm x 13mm, read from `static/models/ring_face.json`), and the
 minimum-feature/edge-margin rules exist specifically because fine detail doesn't survive
 manufacturing at that size. Once you pick a candidate, drag/zoom a crop box over the full
 source image to choose exactly what lands on the face — see "Crop, pan & zoom" below.
@@ -64,7 +64,30 @@ supported size is closest to the face's aspect ratio, and the existing cover-fit
 step in `/api/generate` crops it to the exact aspect ratio afterwards. The `seed` field
 in `/api/generate` is accepted but has no effect with this provider.
 
+## The ring model
+
+`static/models/ring.glb` (18mm inner diameter) has a `body` mesh and a `face` mesh that
+covers the entire curved top of the head. Both are generated from the raw Meshy model in
+`3D Models/` by `tools/prepare_ring.py` (run it with the project venv: `python
+tools/prepare_ring.py`). The script replaces the noisy AI dome with a smooth fitted surface
+pinned to the body's cut edge, and writes `ring_face.json` (face bounding box, outline, rim
+normals, UV convention). `app/config.py` reads face size and outline from that JSON, so the
+backend heightmap and the viewer always agree.
+
+The relief runs across the whole face out to the rim, with no fade-out. The viewer displaces
+`face` vertices straight up by the heightmap and bends the body's shoulder up to meet the
+displaced edge (`buildShoulder` / `displaceFace` in `static/main.js`). The rim's heights are
+smoothed along the edge (`EDGE_SMOOTH_MM`), so the edge rises in broad waves instead of
+copying every spike; the face eases into that smoothed edge over `FACE_BLEND_MM`, and the lift
+fades out down the shoulder over `SHOULDER_FALLOFF_MM`. The finger hole's inner surface is
+never moved. Because the relief is a top-down projection, detail on the steep rolled edge is
+stretched.
+The STL export is still the old rectangular slab.
+
 ## Changing the ring face size / resolution
+
+(Face size normally comes from the ring model, see above; the constants below are only the fallback.)
+
 
 Everything is in `app/config.py` — e.g. to make the face 16mm x 10mm at 60px/mm:
 
@@ -94,8 +117,8 @@ constants automatically. No other code changes needed.
    model is never called again after the initial generation.
 4. The frontend (`static/main.js`, Three.js, no build step) samples the 8-bit preview
    into a ~400x340 vertex grid, displaces a plane, and recomputes normals — polished
-   with `MeshStandardMaterial` (metalness 1, roughness 0.08) under `RoomEnvironment`
-   lighting. The exaggeration slider only scales the *displayed* mesh; exports always
+   with `MeshStandardMaterial` (metalness 1, roughness 0.05) in a photo-studio HDRI
+   (see "Metal look" below). The exaggeration slider only scales the *displayed* mesh; exports always
    use the true (max 0.4mm) relief height. The face plate sits on a stylized torus
    band (see "The 3D ring preview" below) so its small scale reads clearly.
 
@@ -124,6 +147,28 @@ finger size) purely so the face's real scale is obvious next to something recogn
 ring-sized — **this is not a manufacturing model of the shank.** The exported heightmap
 and STL only ever describe the flat face; the manufacturer determines the actual
 band/shank/finger-size geometry separately and fuses or engraves the face pattern onto it.
+
+The face itself is a rounded-rectangle "cushion" slab with slightly bulged sides
+(`ExtrudeGeometry` over a rounded-rect `Shape`), sitting flat (unchanged from the very
+first version of this viewer — the relief mesh has always sat at y=0, and still does).
+The band and both shoulders are ONE continuous swept mesh (`buildShankGeometry` in
+`main.js`, not separate pieces — an earlier version built them as separate objects and
+it showed as a visible seam/lighting discontinuity where they met). Cross-section is
+circular around the bottom of the band and blends into a broad, gently fluted, fairly
+flat fan shape near the top, embedding into the table's side edges.
+
+Critically, **the band's loop lies in a vertical plane** (hole axis horizontal, on Z),
+like a ring actually worn on a finger — not lying flat on its side (an earlier version
+had this wrong: the whole assembly was coplanar/horizontal, which reads as "not a ring
+shape" from a side profile, since there's no vertical drop from the table down to the
+band). The table's own flat/horizontal orientation is correct and unchanged; only the
+band's plane was wrong. This was modeled against real signet ring reference photos
+(rounded cushion face, fluted tapered shoulders, chunky rounded band, vertical band
+loop) rather than guessed from scratch, including a couple of rounds of fixing
+self-intersecting/spiky geometry that showed up from certain camera angles during
+development — worth knowing if you tune the shoulder parameters further, since a plain
+linear blend of the sweep path toward a fixed attachment point can make the centerline
+fold back on itself.
 
 ### Style presets
 
@@ -240,3 +285,45 @@ processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `mod
   it's a preview-quality mesh, not a full-resolution manufacturing file.
 - The 3D ring band is a stylized proportional preview (see "The 3D ring preview" above),
   not a CAD-accurate shank — only the face relief is ever exported.
+
+## Metal look
+
+The whole ring (body, face, relief) uses one shared sterling-silver material (`SILVER` in
+`static/main.js`), buffed to a near-mirror polish (roughness 0.05). Raise `SILVER.roughness`
+(0.15-0.3) for a satin finish.
+
+The ring's surroundings are a real photo-studio HDRI (`loadStudio`, settings in `STUDIO`):
+Poly Haven's "Monochrome Studio 02" (CC0), from `3D Models/monochrome_studio_02_4k.exr`
+(not committed, 77MB; download the 4K EXR from https://polyhaven.com/a/monochrome_studio_02),
+converted by `tools/prepare_skybox.py` (run it with the project venv after changing the
+source) into `static/env/studio_env.hdr`. It's both what the silver reflects (its strip
+softboxes and octabox give the highlights; its dark ceiling gives contrast) and the
+background, slightly blurred (`backgroundBlur`) as if the camera were focused on the ring.
+The script turns the panorama by `YAW_DEG` so the white seamless backdrop sits behind the
+ring from the starting camera; three.js r160 can't rotate an environment map at runtime.
+The HDRI loads in the background; until it arrives the viewer shows a plain light-gray
+background. `STUDIO.reflectionGain` scales how strongly the metal reflects the studio.
+
+The studio's own ceiling is dark, so an upward-facing face would mirror black. A hidden
+soft lightbox above the ring (`STUDIO.topLight`: size, position, brightness) fixes that. It
+sits on `REFLECTION_LAYER`, which the viewing camera never renders, so it only shows up in
+the metal. It glows from its centre and fades smoothly to black at its edges
+(`lightEdgeFade`), like a real softbox; a hard edge made tiny wobbles in the AI-generated
+ring mesh show up as jagged reflection outlines. The reflections are captured once from the
+ring's position (studio plus lightbox, ring hidden), so spinning the ring needs no recapture.
+
+Two things keep the design readable on polished silver, which has no shading of its own:
+
+- The top lightbox is graduated (`topLight.gradient`): bright at one end, dim at the other.
+  Each slope of the relief mirrors a different brightness, so the design reads as shading
+  rather than washing out to uniform white.
+- The face's recesses are darkened like an oxidized ("antiqued") signet ring (`PATINA`):
+  wherever the relief dips below its surroundings within `radiusMm`, the metal gets darker,
+  up to `darkness`. Crevices beside raised detail go dark while broad flat areas stay
+  polished. It's computed from the heightmap on every update and fades out near the rim so
+  the face meets the body without a line. Set `darkness` to 0 for a plain polished face.
+
+Viewer controls (`setupDragControls`): the camera starts turned slightly right
+(`CAMERA_YAW`). Dragging left/right spins the ring on the spot like a turntable (the camera
+and box stay put, so reflections sweep across the metal), dragging up/down tilts the camera
+over or under the ring (all the way round to its underside), and the mouse wheel zooms.

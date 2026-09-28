@@ -10,18 +10,34 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Ring face geometry ---------------------------------------------------
-FACE_WIDTH_MM = 14.0
-FACE_HEIGHT_MM = 12.0
+# The relief covers the whole curved top of the ring head, out to the rim where
+# it meets the shoulders. Its bounding box and outline come from the prepared model (static/models/ring_face.json,
+# written by tools/prepare_ring.py) so the backend and 3D viewer can't drift
+# apart. The fallback is only used if that file hasn't been generated.
+import json
+
+_FACE_INFO_PATH = Path(__file__).resolve().parent.parent / "static" / "models" / "ring_face.json"
+try:
+    _face_info = json.loads(_FACE_INFO_PATH.read_text())
+except (OSError, ValueError):
+    _face_info = {}
+
+FACE_WIDTH_MM = float(_face_info.get("face_width_mm", 14.0))
+FACE_HEIGHT_MM = float(_face_info.get("face_height_mm", 12.0))
+# Outline of the face in mm, centred on the bounding box (x, z); None if unknown.
+FACE_OUTLINE_MM = _face_info.get("outline_xz_mm")
 
 # --- Heightmap resolution ---------------------------------------------------
 PX_PER_MM = 50
-HEIGHTMAP_WIDTH_PX = int(round(FACE_WIDTH_MM * PX_PER_MM))   # 700
-HEIGHTMAP_HEIGHT_PX = int(round(FACE_HEIGHT_MM * PX_PER_MM))  # 600
+HEIGHTMAP_WIDTH_PX = int(round(FACE_WIDTH_MM * PX_PER_MM))   
+HEIGHTMAP_HEIGHT_PX = int(round(FACE_HEIGHT_MM * PX_PER_MM))  
 
 # --- Relief / manufacturing rules ---------------------------------------------------
 RELIEF_MAX_MM = 0.4
-EDGE_MARGIN_MM = 1.0
-EDGE_FEATHER_MM = 0.3
+# The texture runs right to the face's edge: the 3D viewer adds a wall from the
+# ring body's rim up to the displaced edge, so no fade-out is needed.
+EDGE_MARGIN_MM = 0.0
+EDGE_FEATHER_MM = 0.0
 MIN_FEATURE_MM = 0.25
 
 # A pixel counts as "raised" (for coverage/report/min-feature purposes) only

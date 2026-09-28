@@ -38,7 +38,7 @@ PRESETS: dict[str, PresetConfig] = {
     #     high-frequency relief noise once converted to a heightmap
     "emblem": PresetConfig(
         id="emblem",
-        label="Emblem (tiered relief)",
+        label="Emblem",
         template=(
             "bold engraved emblem of {prompt}, flat 2D vector illustration, pure solid "
             "white silhouette shapes on a completely flat solid black background, no "
@@ -47,12 +47,12 @@ PRESETS: dict[str, PresetConfig] = {
             "shapes, single centered subject, symmetrical composition, no text, no "
             "letters, no watermark, no signature, no border, no frame"
         ),
-        levels=4,
-        blur_mm=0.0,
+        levels=1,
+        blur_mm=0.02,
     ),
     "lineart": PresetConfig(
         id="lineart",
-        label="Line Art (2-level)",
+        label="Line Art",
         template=(
             "clean bold line-art engraving of {prompt}, flat 2D vector illustration, "
             "pure solid white outlines and strokes on a completely flat solid black "
@@ -61,8 +61,8 @@ PRESETS: dict[str, PresetConfig] = {
             "details, high contrast, single centered subject, no text, no letters, no "
             "watermark, no signature, no border, no frame"
         ),
-        levels=2,
-        blur_mm=0.0,
+        levels=1,
+        blur_mm=0.02,
     ),
     "organic": PresetConfig(
         id="organic",
@@ -82,8 +82,8 @@ PRESETS: dict[str, PresetConfig] = {
             "border, no frame graphic, no vignette, no circular medallion or disc "
             "shape drawn around it, no text, no letters, no watermark, no signature"
         ),
-        levels=0,
-        blur_mm=0.15,
+        levels=1,
+        blur_mm=0.02,
     ),
 }
 
