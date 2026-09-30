@@ -13,7 +13,7 @@ the gallery — there's no hidden batching. Click it again to add another for co
 
 The 3D preview shows real signet ring models from a library of 10 shapes in UK sizes H–Z
 (pick one from the menu), and applies the design to one of them, **S Square**, over its
-flat square top — about 12.7mm x 12.7mm, read from `static/rings/relief.json`.
+flat square top — about 12.7mm x 13.1mm, read from `static/rings/relief.json`.
 The minimum-feature rules exist because fine detail doesn't survive manufacturing at that
 size. Once you pick a candidate, drag/zoom a crop box over the full
 source image to choose exactly what lands on the face — see "Crop, pan & zoom" below.
@@ -87,10 +87,10 @@ Every ring gets the same polished silver (see "Metal look").
 
 The heightmap is applied to one ring, `RELIEF_SHAPE` / `RELIEF_SIZE` in the script (S
 Square), over its flat top: the triangles visible from straight above (a top-down
-z-buffer) that tilt less than `FACE_MAX_TILT_DEG` (2°) and connect to the top. It stops
+z-buffer) that tilt less than `FACE_MAX_TILT_DEG` (4°) and connect to the top. It stops
 where the top starts to round over, so the rounded edge and shoulders stay plain. That
-area's footprint from above sets the heightmap's size (about 12.7mm x 12.7mm, so the
-crop box is square) and outline, which `app/config.py` reads from
+area's footprint from above sets the heightmap's size (about 12.7mm x 13.1mm, so the
+crop box is nearly square) and outline, which `app/config.py` reads from
 `relief.json`, so the backend and viewer always agree. The design is never clipped to
 that outline.
 

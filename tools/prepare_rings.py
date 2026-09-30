@@ -52,7 +52,7 @@ RELIEF_SHAPE, RELIEF_SIZE = "Square", "S"
 REFINE_LEVELS = 2       # 0.17 mm source edges -> ~0.04 mm on the face
 ZBUFFER_MM = 0.02       # top-down visibility raster resolution
 EDGE_BLEND_MM = 0.2     # relief eases out over this distance before the region's edge
-FACE_MAX_TILT_DEG = 2   # the relief stays on the flat top: it ends where the surface starts to tilt
+FACE_MAX_TILT_DEG = 4   # the relief stays on the flat top: it ends where the surface starts to tilt
 
 
 # --- mesh io -------------------------------------------------------------------
