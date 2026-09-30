@@ -296,12 +296,22 @@ def compute_report(
     )
 
 
-def process_image(img_rgb: np.ndarray, params: ProcessParams, contains_text_request: bool = False) -> tuple[np.ndarray, np.ndarray, ProcessReport]:
+def process_image(
+    img_rgb: np.ndarray,
+    params: ProcessParams,
+    contains_text_request: bool = False,
+    face_width_mm: float = config.FACE_WIDTH_MM,
+    face_height_mm: float = config.FACE_HEIGHT_MM,
+    face_outline_mm=config.FACE_OUTLINE_MM,
+) -> tuple[np.ndarray, np.ndarray, ProcessReport]:
     """
-    Full pipeline: raw RGB image -> (heightmap_16bit, preview_8bit, report).
+    Full pipeline: raw RGB image -> (heightmap_16bit, preview_8bit, report),
+    for a design area of face_width_mm x face_height_mm (PX_PER_MM px per mm).
     """
     gray = to_grayscale(img_rgb)
-    gray = resize_to_heightmap(gray)
+    gray = resize_to_heightmap(
+        gray, int(round(face_width_mm * config.PX_PER_MM)), int(round(face_height_mm * config.PX_PER_MM))
+    )
     gray = apply_invert(gray, params.invert)
     gray = apply_gamma_contrast(gray, params.gamma, params.contrast)
     gray = apply_blur(gray, params.blur_mm)
@@ -334,8 +344,11 @@ def process_image(img_rgb: np.ndarray, params: ProcessParams, contains_text_requ
     gray01_final = heightmap_16bit.astype(np.float32) / 65535.0
     # Coverage/volume/weight only count what actually lands on the face.
     on_face = (
-        outline_margin_mask(gray01_final.shape[0], gray01_final.shape[1], config.FACE_OUTLINE_MM, 0.0, 1e-6) > 0
-        if config.FACE_OUTLINE_MM else None
+        outline_margin_mask(
+            gray01_final.shape[0], gray01_final.shape[1], face_outline_mm, 0.0, 1e-6,
+            face_width_mm=face_width_mm, face_height_mm=face_height_mm,
+        ) > 0
+        if face_outline_mm else None
     )
     report = compute_report(
         gray01_final,

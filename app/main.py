@@ -61,6 +61,9 @@ class ProcessRequest(BaseModel):
     crop_zoom: float = Field(default=1.0, ge=config.CROP_ZOOM_MIN, le=config.CROP_ZOOM_MAX)
     crop_offset_x: float = Field(default=0.0, ge=-1.0, le=1.0)
     crop_offset_y: float = Field(default=0.0, ge=-1.0, le=1.0)
+    # The design area: the relief ring's top that tilts less than this angle
+    # (the viewer's slider). None = the default area.
+    face_tilt_deg: Optional[float] = None
 
 
 class ReportOut(BaseModel):
@@ -228,10 +231,12 @@ def process(req: ProcessRequest):
 
     # Crop/zoom/pan happens here, every call, against the cached full image
     # -- never against the image model.
+    face_w, face_h, face_outline = config.face_geometry(req.face_tilt_deg)
+    hm_w, hm_h = int(round(face_w * config.PX_PER_MM)), int(round(face_h * config.PX_PER_MM))
     rgb = cover_fit_resize(
         full_rgb,
-        config.HEIGHTMAP_WIDTH_PX,
-        config.HEIGHTMAP_HEIGHT_PX,
+        hm_w,
+        hm_h,
         zoom=req.crop_zoom,
         offset_x=req.crop_offset_x,
         offset_y=req.crop_offset_y,
@@ -253,7 +258,9 @@ def process(req: ProcessRequest):
     )
 
     contains_text_request = prompts.mentions_text(meta.get("prompt", ""))
-    heightmap_16bit, preview_8bit, report = process_image(rgb, params, contains_text_request)
+    heightmap_16bit, preview_8bit, report = process_image(
+        rgb, params, contains_text_request, face_width_mm=face_w, face_height_mm=face_h, face_outline_mm=face_outline
+    )
 
     storage.save_gray16_png(d / "heightmap.png", heightmap_16bit)
     storage.save_gray8_png(d / "preview.png", preview_8bit)
@@ -274,8 +281,9 @@ def process(req: ProcessRequest):
             "edge_feather_mm": params.edge_feather_mm,
             "relief_max_mm": config.RELIEF_MAX_MM,
             "px_per_mm": config.PX_PER_MM,
-            "face_width_mm": config.FACE_WIDTH_MM,
-            "face_height_mm": config.FACE_HEIGHT_MM,
+            "face_width_mm": face_w,
+            "face_height_mm": face_h,
+            "face_tilt_deg": req.face_tilt_deg,
             "crop_zoom": req.crop_zoom,
             "crop_offset_x": req.crop_offset_x,
             "crop_offset_y": req.crop_offset_y,
@@ -341,7 +349,8 @@ def get_stl(design_id: str):
     stl_path = d / "model.stl"
     if not stl_path.exists() or stl_path.stat().st_mtime < heightmap_path.stat().st_mtime:
         heightmap_16bit = cv2.imread(str(heightmap_path), cv2.IMREAD_UNCHANGED)
-        mesh = heightmap_to_stl(heightmap_16bit)
+        h_px, w_px = heightmap_16bit.shape  # the face size it was made for (PX_PER_MM px per mm)
+        mesh = heightmap_to_stl(heightmap_16bit, face_width_mm=w_px / config.PX_PER_MM, face_height_mm=h_px / config.PX_PER_MM)
         mesh.export(str(stl_path))
 
     return FileResponse(str(stl_path), media_type="model/stl", filename="ring_face_relief.stl")

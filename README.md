@@ -13,7 +13,7 @@ the gallery — there's no hidden batching. Click it again to add another for co
 
 The 3D preview shows real signet ring models from a library of 10 shapes in UK sizes H–Z
 (pick one from the menu), and applies the design to one of them, **S Square**, over its
-flat square top — about 13.1mm x 13.1mm, read from `static/rings/relief.json`.
+flat top — about 13.1mm x 13.4mm at the default 8°, adjustable with a slider, read from `static/rings/relief.json`.
 The minimum-feature rules exist because fine detail doesn't survive manufacturing at that
 size. Once you pick a candidate, drag/zoom a crop box over the full
 source image to choose exactly what lands on the face — see "Crop, pan & zoom" below.
@@ -87,22 +87,47 @@ Every ring gets the same polished silver (see "Metal look").
 
 The heightmap is applied to one ring, `RELIEF_SHAPE` / `RELIEF_SIZE` in the script (S
 Square), over its flat top: the triangles visible from straight above (a top-down
-z-buffer) that tilt less than `FACE_MAX_TILT_DEG` (6°) and connect to the top. It stops
-where the top starts to round over, so the rounded edge and shoulders stay plain. That
-area's footprint from above sets the heightmap's size (about 13.1mm x 13.1mm, so the
-crop box is square) and outline, which `app/config.py` reads from
-`relief.json`, so the backend and viewer always agree. The design is never clipped to
-that outline.
+z-buffer) that tilt less than an angle you set live with the **Design area** slider under
+the ring menu (0.5°–30°, default `DEFAULT_TILT_DEG` = 8°). Lower keeps the design on the
+flattest part of the top; higher spreads it onto the rounded edge. The area's footprint
+from above sets the heightmap's size and the crop box's aspect ratio (about 13.1mm x
+13.4mm at 8°). The design is never clipped to that outline. The slider only shows for the
+relief ring.
 
-The script refines the region's mesh twice (each pass splits every triangle in four, down
-to ~0.04mm edges) so the relief has enough vertices for fine detail, splitting the
-neighbouring triangles to match so there are no cracks. The region's vertices come first
-in the GLB, with top-down UVs (u along X, v along Z, image row 0 at -Z) and a `_weight`
-attribute that eases the relief out over the last 0.2mm, so it finishes on the flat.
+So the viewer can change the angle without a rebuild, the script prepares everything any
+angle up to `TILT_MAX_DEG` (30°) could need:
 
-The viewer (`displaceFace` in `static/main.js`) pushes each flat-top vertex out along its
-surface normal (straight up) by the heightmap.
-Other rings show without a design, and the menu says so.
+- the "zone" — the top faces up to 30° plus the band around them (the rounded edge and
+  upper shoulders, within `BLEND_MM` = 2.5mm, not facing down, so the finger hole is left
+  alone) — refined twice (each pass splits every triangle in four, down to ~0.04mm edges),
+  splitting the neighbouring triangles to match so there are no cracks. In the GLB the
+  top faces come first, then the band's, and the zone's vertices come first;
+- `relief.json`'s `tilt_table`: for every 0.5°, the area's bounding box seen from above
+  and its outline. The backend sizes the heightmap from it (`face_tilt_deg` on
+  `/api/process`, `config.face_geometry`), and the viewer maps its top-down UVs onto the
+  same box (u along X, v along Z, image row 0 at -Z).
+
+When the slider moves, the viewer (`computeDesignArea` in `static/main.js`, about 0.1s)
+takes the top faces tilting less than the angle as the design area, traces its edge into
+an ordered loop, and measures every nearby vertex's distance to that edge along the
+surface (Dijkstra from all edge points at once). On release, it asks the backend for a
+heightmap of the new size; while dragging, the current heightmap is stretched to the new
+area.
+
+So the design doesn't start abruptly at the area's edge, the band around it curves up to
+meet it. The viewer (`displaceFace` in `static/main.js`) then, on every update:
+
+1. reads the design's height at every point on the area's edge and smooths it along
+   the edge (`EDGE_SMOOTH_MM`), so the band follows the design's broad shape;
+2. pushes each design-area vertex out along its normal (straight up) by the heightmap,
+   easing into that smoothed edge height over the last `INNER_MM` (0.3mm), so the two
+   meet exactly;
+3. pushes each band vertex out along its own normal by the edge height at its nearest
+   edge point, times a smooth falloff: full at the edge, zero `BLEND_MM` down, with no
+   kink at either end. The band rises into the design and blends back into the untouched
+   ring lower down.
+
+Where the design is dark at the edge, the band stays as it is. Other rings show without a design, and the menu says so.
 The STL export is still the plain rectangular relief slab.
 
 ## How it works

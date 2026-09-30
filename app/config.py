@@ -29,6 +29,21 @@ FACE_HEIGHT_MM = float(_face_info.get("face_height_mm", 12.0))
 # Outline of the face in mm, centred on the bounding box (x, z); None if unknown.
 FACE_OUTLINE_MM = _face_info.get("outline_xz_mm")
 
+# The design area's edge is an angle the viewer's slider sets: the top that
+# tilts less than it. relief.json tabulates the area's size and outline per
+# angle; requests pass the angle and get that size (face_geometry).
+FACE_TILT_TABLE = _face_info.get("tilt_table", [])
+DEFAULT_FACE_TILT_DEG = _face_info.get("default_tilt_deg")
+
+
+def face_geometry(tilt_deg=None):
+    """(width_mm, height_mm, outline) of the design area for a tilt angle
+    (nearest tabulated step); the defaults when no angle or table is given."""
+    if tilt_deg is None or not FACE_TILT_TABLE:
+        return FACE_WIDTH_MM, FACE_HEIGHT_MM, FACE_OUTLINE_MM
+    e = min(FACE_TILT_TABLE, key=lambda t: abs(t["deg"] - tilt_deg))
+    return e["width_mm"], e["height_mm"], e["outline_xz_mm"]
+
 # --- Heightmap resolution ---------------------------------------------------
 PX_PER_MM = 50
 HEIGHTMAP_WIDTH_PX = int(round(FACE_WIDTH_MM * PX_PER_MM))   

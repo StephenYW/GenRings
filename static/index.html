@@ -26,6 +26,11 @@
         <label for="ringSize">Size (UK) — inner diameter</label>
         <select id="ringSize"></select>
         <p id="ringReliefNote" class="hint" hidden></p>
+        <div id="designTiltGroup" hidden>
+          <label for="designTilt">Design area: top tilting under <span id="designTiltVal"></span></label>
+          <input type="range" id="designTilt" min="0.5" max="30" step="0.5" value="8" />
+          <p class="hint">Lower keeps the design on the flattest part of the top; higher spreads it onto the rounded edge.</p>
+        </div>
       </section>
 
       <section>

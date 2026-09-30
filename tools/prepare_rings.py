@@ -11,17 +11,21 @@ Source axes: finger-hole axis = X, head up = +Z, hole centred on the origin.
 Viewer axes: up = +Y, hole axis = Z, so (x, y, z)_viewer = (y, z, x)_source
 (a cyclic swap, so handedness is kept).
 
-The relief (heightmap) goes on one ring, RELIEF_SHAPE / RELIEF_SIZE. Its face
-region is the ring's flat top: the triangles visible from straight above (a
-top-down z-buffer) that tilt less than FACE_MAX_TILT_DEG from flat and connect
-to the top. It stops where the top starts to round over, so the rounded edge
-and the shoulders stay plain. That region is
-refined REFINE_LEVELS times (each splits every triangle in 4) so the relief
-has enough vertices for fine detail, with the neighbouring triangles split to
-match so there are no cracks. Its vertices come first in the GLB, carry
-top-down UVs (u along X, v along Z, image row 0 at -Z) spanning the region's
-bounding box, and a `_WEIGHT` attribute that eases the relief out over the
-last EDGE_BLEND_MM before the region's edge, where the surface turns vertical.
+The relief (heightmap) goes on one ring, RELIEF_SHAPE / RELIEF_SIZE, on its
+flat top: the triangles visible from straight above (a top-down z-buffer) that
+tilt less than an angle the viewer sets live (a slider, default
+DEFAULT_TILT_DEG, up to TILT_MAX_DEG). So the viewer can recompute that area
+without a rebuild, the script prepares everything any angle could need:
+
+- The "zone": the top faces up to TILT_MAX_DEG plus the band around them (the
+  rounded edge and upper shoulders, within BLEND_MM, which the viewer bends to
+  meet the design at the edge). It is refined REFINE_LEVELS times (each splits
+  every triangle in 4), with the neighbouring triangles split to match so
+  there are no cracks. In the GLB, the top faces come first, then the band's,
+  then the rest; the zone's vertices likewise come first.
+- relief.json's `tilt_table`: for every TILT_STEP_DEG, the flat top's bounding
+  box seen from above (which the heightmap and crop box cover, and the viewer
+  maps its top-down UVs to) and its outline.
 
     python tools/prepare_rings.py            # everything
     python tools/prepare_rings.py --relief   # just the relief ring + json
@@ -51,8 +55,11 @@ SHAPES = [  # (folder, base shape label, ridged)
 RELIEF_SHAPE, RELIEF_SIZE = "Square", "S"
 REFINE_LEVELS = 2       # 0.17 mm source edges -> ~0.04 mm on the face
 ZBUFFER_MM = 0.02       # top-down visibility raster resolution
-EDGE_BLEND_MM = 0.2     # relief eases out over this distance before the region's edge
-FACE_MAX_TILT_DEG = 6   # the relief stays on the flat top: it ends where the surface starts to tilt
+DEFAULT_TILT_DEG = 8    # the design area: the top that tilts less than this (the viewer's slider starts here)
+TILT_MAX_DEG = 30       # the slider's range; the mesh is prepared for any angle up to this
+TILT_STEP_DEG = 0.5
+BLEND_MM = 2.5          # how far down the band the curve that meets the design reaches
+INNER_MM = 0.3          # on the flat top, the design eases into the (smoothed) edge height over this
 
 
 # --- mesh io -------------------------------------------------------------------
@@ -146,9 +153,10 @@ def face_adjacency(f: np.ndarray) -> np.ndarray:
     return np.c_[owner[:-1][same], owner[1:][same]]
 
 
-def top_face(v: np.ndarray, f: np.ndarray) -> np.ndarray:
+def top_face(v: np.ndarray, f: np.ndarray, max_tilt_deg: float):
     """The ring's top face (viewer axes: up = +Y), as a bool mask of faces:
-    visible from straight above and tilted less than FACE_MAX_TILT_DEG.
+    visible from straight above and tilted less than max_tilt_deg. Also
+    returns the z-buffer (face id per pixel, -1 = none) and its origin.
 
     Z-buffer in the XZ plane: draw every upward-facing triangle lowest first so
     each pixel keeps the highest one; any triangle left showing is visible.
@@ -166,7 +174,7 @@ def top_face(v: np.ndarray, f: np.ndarray) -> np.ndarray:
         cv2.fillConvexPoly(ids, px[f[t]], int(t))
     vis = np.zeros(len(f), bool)
     vis[np.unique(ids[ids >= 0])] = True
-    flat = fn[:, 1] > np.cos(np.radians(FACE_MAX_TILT_DEG)) * np.linalg.norm(fn, axis=1)
+    flat = fn[:, 1] > np.cos(np.radians(max_tilt_deg)) * np.linalg.norm(fn, axis=1)
     up = up & flat
     vis &= flat
 
@@ -192,15 +200,18 @@ def top_face(v: np.ndarray, f: np.ndarray) -> np.ndarray:
             if not keep[nb]:
                 keep[nb] = True
                 stack.append(nb)
-    return keep
+    return keep, ids, (x0, z0)
 
 
 def refine(v: np.ndarray, f: np.ndarray, sel: np.ndarray, levels: int):
-    """Split the selected faces 1-to-4, `levels` times, splitting neighbouring
-    faces to match (1-to-2 or 1-to-3) so the mesh stays crack-free.
-    Returns (vertices, faces, selected mask)."""
+    """Split the selected faces (sel != 0) 1-to-4, `levels` times, splitting
+    neighbouring faces to match (1-to-2 or 1-to-3) so the mesh stays
+    crack-free. `sel` may be a bool mask or integer labels; split faces keep
+    their parent's label, the matching neighbour splits get 0.
+    Returns (vertices, faces, labels)."""
     for _ in range(levels):
-        e_sel = np.sort(np.c_[f[sel][:, [0, 1]], f[sel][:, [1, 2]], f[sel][:, [2, 0]]].reshape(-1, 2), axis=1)
+        fs = f[sel != 0]
+        e_sel = np.sort(np.c_[fs[:, [0, 1]], fs[:, [1, 2]], fs[:, [2, 0]]].reshape(-1, 2), axis=1)
         e_sel = np.unique(e_sel, axis=0)
         mid_index = {(int(a), int(b)): len(v) + i for i, (a, b) in enumerate(e_sel)}
         v = np.vstack([v, (v[e_sel[:, 0]] + v[e_sel[:, 1]]) / 2])
@@ -228,73 +239,122 @@ def refine(v: np.ndarray, f: np.ndarray, sel: np.ndarray, levels: int):
                     out_f += [[a_, mm[0], c_], [mm[0], b_, c_]]
                 else:
                     out_f += [[mm[0], b_, mm[1]], [a_, mm[0], mm[1]], [a_, mm[1], c_]]
-                out_sel += [False] * (2 if k == 1 else 3)
-        f, sel = np.array(out_f, np.int64), np.array(out_sel, bool)
+                out_sel += [0] * (2 if k == 1 else 3)
+        f, sel = np.array(out_f, np.int64), np.array(out_sel, dtype=sel.dtype)
     return v, f, sel
 
 
-def build_relief(v: np.ndarray, f: np.ndarray):
-    """Refine the top-visible region and order it first. Returns (verts, faces,
-    uv, weight, region_vertex_count, info)."""
-    sel = top_face(v, f)
-    print(f"  top face: {sel.sum()} of {len(f)} faces")
-    v, f, sel = refine(v, f, sel, REFINE_LEVELS)
-    print(f"  refined: {len(f)} faces ({sel.sum()} in the region), {len(v)} vertices")
+def boundary_edges(faces: np.ndarray) -> np.ndarray:
+    """Edges used by exactly one of `faces` (sorted vertex pairs)."""
+    e = np.sort(np.c_[faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]].reshape(-1, 2), axis=1)
+    uniq, cnt = np.unique(e, axis=0, return_counts=True)
+    return uniq[cnt == 1]
 
-    in_region = np.zeros(len(v), bool)
-    in_region[np.unique(f[sel])] = True
-    order = np.r_[np.where(in_region)[0], np.where(~in_region)[0]]
+
+def nearest(points: np.ndarray, targets: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """For each point, the index of the nearest target and the distance to it."""
+    idx = np.empty(len(points), np.int64)
+    dist = np.empty(len(points))
+    for a in range(0, len(points), 2000):
+        d2 = ((points[a:a + 2000, None, :] - targets[None, :, :]) ** 2).sum(-1)
+        idx[a:a + 2000] = d2.argmin(1)
+        dist[a:a + 2000] = np.sqrt(d2[np.arange(len(d2)), idx[a:a + 2000]])
+    return idx, dist
+
+
+def blend_band(v: np.ndarray, f: np.ndarray, region: np.ndarray, depth: float) -> np.ndarray:
+    """Faces of the band around `region` that the viewer bends to meet the
+    design: connected to the region, within `depth` (+ a margin) of its edge,
+    and not facing down (which keeps the finger hole's inner surface out)."""
+    fn = np.cross(v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]])
+    fn /= np.maximum(np.linalg.norm(fn, axis=1), 1e-12)[:, None]
+    rim = np.unique(boundary_edges(f[region]))
+    _, d = nearest(v[f].mean(1), v[rim])
+    cand = ~region & (fn[:, 1] > -0.5) & (d < depth + 0.3)
+    nbrs = [[] for _ in range(len(f))]
+    for a, b in face_adjacency(f):
+        nbrs[a].append(b)
+        nbrs[b].append(a)
+    band = np.zeros(len(f), bool)
+    stack = list(np.where(region)[0])
+    while stack:
+        for nb in nbrs[stack.pop()]:
+            if cand[nb] and not band[nb]:
+                band[nb] = True
+                stack.append(nb)
+    return band
+
+
+def tilt_table(f_tilt: np.ndarray, top: np.ndarray, ids: np.ndarray, origin) -> list[dict]:
+    """For every TILT_STEP_DEG: the flat top's bounding box seen from above
+    (viewer x/z, mm) and its outline (centred on the box), from the z-buffer."""
+    x0r, z0r = origin
+    table = []
+    for deg in np.arange(TILT_STEP_DEG, TILT_MAX_DEG + 1e-9, TILT_STEP_DEG):
+        sel = top & (f_tilt < deg)
+        if not sel.any():
+            continue
+        mask = ((ids >= 0) & sel[np.maximum(ids, 0)]).astype(np.uint8)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        c = max(contours, key=cv2.contourArea)
+        bx, bz, bw, bh = cv2.boundingRect(c)
+        x0, z0 = x0r + bx * ZBUFFER_MM, z0r + bz * ZBUFFER_MM
+        w, h = (bw - 1) * ZBUFFER_MM, (bh - 1) * ZBUFFER_MM
+        c = cv2.approxPolyDP(c, 1.0, True).reshape(-1, 2)  # within 1 px = 0.02 mm
+        cx, cz = x0 + w / 2, z0 + h / 2
+        table.append({
+            "deg": round(float(deg), 2),
+            "x0": round(float(x0), 4), "z0": round(float(z0), 4),
+            "width_mm": round(float(w), 3), "height_mm": round(float(h), 3),
+            "outline_xz_mm": [[round(float(x0r + p[0] * ZBUFFER_MM - cx), 3),
+                               round(float(z0r + p[1] * ZBUFFER_MM - cz), 3)] for p in c],
+        })
+    return table
+
+
+def build_relief(v: np.ndarray, f: np.ndarray):
+    """Prepare the relief ring for any design-area angle up to TILT_MAX_DEG:
+    refine the zone (top faces + blend band), order it first, and tabulate
+    the flat top's size and outline per angle. Returns (verts, faces, info)."""
+    top, ids, origin = top_face(v, f, TILT_MAX_DEG)
+    band = blend_band(v, f, top, BLEND_MM)
+    print(f"  top (< {TILT_MAX_DEG} deg): {top.sum()} faces; blend band: {band.sum()} faces (of {len(f)})")
+    fn = np.cross(v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]])
+    f_tilt = np.degrees(np.arccos(np.clip(fn[:, 1] / np.maximum(np.linalg.norm(fn, axis=1), 1e-12), -1, 1)))
+    table = tilt_table(f_tilt, top, ids, origin)
+
+    labels = np.where(top, 1, np.where(band, 2, 0)).astype(np.int8)
+    v, f, labels = refine(v, f, labels, REFINE_LEVELS)
+    # faces: top, then band, then the rest; vertices: the zone's first
+    f = np.r_[f[labels == 1], f[labels == 2], f[labels == 0]]
+    n_top_faces, n_zone_faces = int((labels == 1).sum()), int((labels != 0).sum())
+    in_zone = np.zeros(len(v), bool)
+    in_zone[np.unique(f[:n_zone_faces])] = True
+    order = np.r_[np.where(in_zone)[0], np.where(~in_zone)[0]]
     remap = np.empty(len(v), np.int64)
     remap[order] = np.arange(len(v))
     v, f = v[order], remap[f]
-    n_region = int(in_region.sum())
+    n_zone = int(in_zone.sum())
+    print(f"  refined: {len(f)} faces ({n_top_faces} top, {n_zone_faces - n_top_faces} band), "
+          f"{len(v)} vertices ({n_zone} in the zone); tilt table {len(table)} steps")
 
-    # region boundary = edges used once by region faces
-    rf = f[sel]
-    e = np.sort(np.c_[rf[:, [0, 1]], rf[:, [1, 2]], rf[:, [2, 0]]].reshape(-1, 2), axis=1)
-    uniq, cnt = np.unique(e, axis=0, return_counts=True)
-    border = np.unique(uniq[cnt == 1])
-
-    # bounding box and outline of the region seen from above
-    rv = v[:n_region]
-    x0, x1 = rv[:, 0].min(), rv[:, 0].max()
-    z0, z1 = rv[:, 2].min(), rv[:, 2].max()
-    fw, fd = x1 - x0, z1 - z0
-    uv = np.c_[(v[:, 0] - x0) / fw, (v[:, 2] - z0) / fd]
-    cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
-
-    # relief weight: eases out over EDGE_BLEND_MM before the region's edge
-    bpts = v[border]
-    dist = np.empty(n_region)
-    for a in range(0, n_region, 4000):
-        d2 = ((rv[a:a + 4000, None, :] - bpts[None, :, :]) ** 2).sum(-1)
-        dist[a:a + 4000] = np.sqrt(d2.min(1))
-    t = np.clip(dist / EDGE_BLEND_MM, 0, 1)
-    weight = np.zeros(len(v))
-    weight[:n_region] = t * t * (3 - 2 * t)
-
-    # outline: the region's footprint from above, as a polygon (mm, centred on the bbox)
-    res = 0.05
-    W, H = int(fw / res) + 3, int(fd / res) + 3
-    mask = np.zeros((H, W), np.uint8)
-    px = np.round(np.c_[(v[:, 0] - x0) / res + 1, (v[:, 2] - z0) / res + 1]).astype(np.int32)
-    for tri in f[sel]:
-        cv2.fillConvexPoly(mask, px[tri], 1)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    c = max(contours, key=cv2.contourArea).reshape(-1, 2).astype(float)
-    outline = [[round((p[0] - 1) * res + x0 - cx, 3), round((p[1] - 1) * res + z0 - cz, 3)] for p in c]
-
+    default = min(table, key=lambda e: abs(e["deg"] - DEFAULT_TILT_DEG))
     info = {
-        "face_width_mm": round(float(fw), 3),
-        "face_height_mm": round(float(fd), 3),
-        "outline_xz_mm": outline,
-        "region_vertex_count": n_region,
-        "top_y_mm": round(float(rv[:, 1].max()), 3),
-        "edge_blend_mm": EDGE_BLEND_MM,
-        "uv": "u = (x - xmin) / face_width ; v = (z - zmin) / face_height ; image row 0 at -Z",
-        "note": f"region = the flat top: visible from above and tilted < {FACE_MAX_TILT_DEG} deg",
+        "default_tilt_deg": default["deg"],
+        "tilt_step_deg": TILT_STEP_DEG,
+        # the default design area, for the backend's defaults
+        "face_width_mm": default["width_mm"],
+        "face_height_mm": default["height_mm"],
+        "outline_xz_mm": default["outline_xz_mm"],
+        "tilt_table": table,
+        "top_face_count": n_top_faces,
+        "zone_face_count": n_zone_faces,
+        "zone_vertex_count": n_zone,
+        "blend_mm": BLEND_MM,
+        "inner_mm": INNER_MM,
+        "uv": "top-down: u = (x - x0) / width_mm ; v = (z - z0) / height_mm ; image row 0 at -Z",
     }
-    return v, f, uv, weight, n_region, info
+    return v, f, info
 
 
 # --- main ------------------------------------------------------------------------
@@ -327,8 +387,8 @@ def main() -> None:
             dia = inner_diameter(v, f)
             if is_relief:
                 print(f"{folder} {size}: building relief face region")
-                v, f, uv, w, n_region, info = build_relief(v, f)
-                write_glb(OUT_DIR / rel, f"{size}_{folder}", v, f, {"TEXCOORD_0": uv, "_WEIGHT": w})
+                v, f, info = build_relief(v, f)
+                write_glb(OUT_DIR / rel, f"{size}_{folder}", v, f)
                 info.update({"shape": folder, "size": size, "file": rel, "inner_diameter_mm": round(dia, 3)})
                 (OUT_DIR / "relief.json").write_text(json.dumps(info))
             else:
