@@ -10,13 +10,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Ring face geometry ---------------------------------------------------
-# The relief covers the whole curved top of the ring head, out to the rim where
-# it meets the shoulders. Its bounding box and outline come from the prepared model (static/models/ring_face.json,
-# written by tools/prepare_ring.py) so the backend and 3D viewer can't drift
-# apart. The fallback is only used if that file hasn't been generated.
+# The relief goes on one ring from the library (S Square for now) and covers
+# its top face: the flat top and its rounded edge, up to where the edge rolls
+# over into the shoulders. That region's bounding box (the heightmap's size)
+# and outline come from static/rings/relief.json, written by
+# tools/prepare_rings.py, so the backend and 3D viewer can't drift apart. The
+# fallback is only used if that file hasn't been generated.
 import json
 
-_FACE_INFO_PATH = Path(__file__).resolve().parent.parent / "static" / "models" / "ring_face.json"
+_FACE_INFO_PATH = Path(__file__).resolve().parent.parent / "static" / "rings" / "relief.json"
 try:
     _face_info = json.loads(_FACE_INFO_PATH.read_text())
 except (OSError, ValueError):

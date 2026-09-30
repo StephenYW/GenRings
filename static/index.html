@@ -20,6 +20,15 @@
       <h1>Ring Face Relief Designer</h1>
 
       <section>
+        <label for="ringShape">Ring shape</label>
+        <select id="ringShape"></select>
+        <label class="checkbox-row"><input type="checkbox" id="ringRidged" /> Ridged</label>
+        <label for="ringSize">Size (UK) — inner diameter</label>
+        <select id="ringSize"></select>
+        <p id="ringReliefNote" class="hint" hidden></p>
+      </section>
+
+      <section>
         <label for="prompt">Design description</label>
         <textarea id="prompt" rows="3" placeholder="e.g. a howling wolf under a crescent moon"></textarea>
 
@@ -93,6 +102,6 @@
     </main>
   </div>
 
-  <script type="module" src="/main.js?v=ring-glb"></script>
+  <script type="module" src="/main.js?v=rings"></script>
 </body>
 </html>

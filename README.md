@@ -11,10 +11,11 @@ margins, quantization), and the weight/volume estimate are deterministic code in
 Each click of "Generate" makes exactly **one** image (one billed API call) and adds it to
 the gallery — there's no hidden batching. Click it again to add another for comparison.
 
-The 3D preview renders the face attached to a small signet ring band so its real-world
-scale is obvious — the engraved area is genuinely small (about 14mm x 13mm, read from `static/models/ring_face.json`), and the
-minimum-feature/edge-margin rules exist specifically because fine detail doesn't survive
-manufacturing at that size. Once you pick a candidate, drag/zoom a crop box over the full
+The 3D preview shows real signet ring models from a library of 10 shapes in UK sizes H–Z
+(pick one from the menu), and applies the design to one of them, **S Square**, over its
+square top face — about 14.2mm x 13.9mm, read from `static/rings/relief.json`.
+The minimum-feature rules exist because fine detail doesn't survive manufacturing at that
+size. Once you pick a candidate, drag/zoom a crop box over the full
 source image to choose exactly what lands on the face — see "Crop, pan & zoom" below.
 
 ## Quick start
@@ -25,6 +26,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env   # defaults to IMAGE_PROVIDER=mock, no API key needed
+
+python tools/prepare_rings.py   # once: converts the ring library (see "Ring library")
 
 uvicorn app.main:app --reload --port 8420
 ```
@@ -64,41 +67,44 @@ supported size is closest to the face's aspect ratio, and the existing cover-fit
 step in `/api/generate` crops it to the exact aspect ratio afterwards. The `seed` field
 in `/api/generate` is accepted but has no effect with this provider.
 
-## The ring model
+## Ring library
 
-`static/models/ring.glb` (18mm inner diameter) has a `body` mesh and a `face` mesh that
-covers the entire curved top of the head. Both are generated from the raw Meshy model in
-`3D Models/` by `tools/prepare_ring.py` (run it with the project venv: `python
-tools/prepare_ring.py`). The script replaces the noisy AI dome with a smooth fitted surface
-pinned to the body's cut edge, and writes `ring_face.json` (face bounding box, outline, rim
-normals, UV convention). `app/config.py` reads face size and outline from that JSON, so the
-backend heightmap and the viewer always agree.
+The ring models live in `3D Models/Rings STL/<Shape>/<Size>_<Shape>.stl` (not committed,
+1.5GB): 10 shapes — Circle, Oval, Square, Rectangle and Thin rectangle, each plain or
+ridged — in UK sizes H–Z (inner diameter 14.7mm to 22.0mm), all clean watertight meshes in
+millimetres. `tools/prepare_rings.py` (run it with the project venv; about a minute)
+converts them for the viewer:
 
-The relief runs across the whole face out to the rim, with no fade-out. The viewer displaces
-`face` vertices straight up by the heightmap and bends the body's shoulder up to meet the
-displaced edge (`buildShoulder` / `displaceFace` in `static/main.js`). The rim's heights are
-smoothed along the edge (`EDGE_SMOOTH_MM`), so the edge rises in broad waves instead of
-copying every spike; the face eases into that smoothed edge over `FACE_BLEND_MM`, and the lift
-fades out down the shoulder over `SHOULDER_FALLOFF_MM`. The finger hole's inner surface is
-never moved. Because the relief is a top-down projection, detail on the steep rolled edge is
-stretched.
-The STL export is still the old rectangular slab.
+- `static/rings/<Shape>/<Size>.glb` — one mesh per ring, rotated to the viewer's axes
+  (up = +Y, finger hole along Z). Not committed (~570MB); rerun the script to rebuild.
+- `static/rings/catalog.json` — every shape and size with its measured inner diameter,
+  which the viewer's ring menu (Shape / Ridged / Size) is built from.
+- `static/rings/relief.json` — the relief ring's face region (see below).
 
-## Changing the ring face size / resolution
+Every ring gets the same polished silver (see "Metal look").
 
-(Face size normally comes from the ring model, see above; the constants below are only the fallback.)
+### Where the design goes
 
+The heightmap is applied to one ring, `RELIEF_SHAPE` / `RELIEF_SIZE` in the script (S
+Square), over its top face: the triangles visible from straight above (a top-down
+z-buffer) that tilt less than `FACE_MAX_TILT_DEG` (45°) and connect to the top — the flat
+square top and its rounded edge, up to where it rolls over into the shoulders, which stay
+plain. That face's footprint from above sets the heightmap's size (14.16mm x 13.88mm, so
+the crop box is nearly square) and outline, which `app/config.py` reads from
+`relief.json`, so the backend and viewer always agree. The design is never clipped to
+that outline.
 
-Everything is in `app/config.py` — e.g. to make the face 16mm x 10mm at 60px/mm:
+The script refines the region's mesh twice (each pass splits every triangle in four, down
+to ~0.04mm edges) so the relief has enough vertices for fine detail, splitting the
+neighbouring triangles to match so there are no cracks. The region's vertices come first
+in the GLB, with top-down UVs (u along X, v along Z, image row 0 at -Z) and a `_weight`
+attribute that eases the relief out over the last 0.2mm before the face's edge, so the
+plain shoulders meet it without a step.
 
-```python
-FACE_WIDTH_MM = 16.0
-FACE_HEIGHT_MM = 10.0
-PX_PER_MM = 60
-```
-
-The heightmap resolution, edge-margin masking, and 3D viewer all derive from these
-constants automatically. No other code changes needed.
+The viewer (`displaceFace` in `static/main.js`) pushes each top-face vertex out along its
+surface normal by the heightmap: straight up on the flat top, angled on the rounded edge.
+Other rings show without a design, and the menu says so.
+The STL export is still the plain rectangular relief slab.
 
 ## How it works
 
@@ -110,17 +116,16 @@ constants automatically. No other code changes needed.
 2. **Process** (`POST /api/process`, pure functions in `app/processing.py`): grayscale →
    optional invert/gamma/contrast → Gaussian blur → normalize → quantize to N levels →
    enforce minimum feature size (morphological open/close + small-component removal) →
-   feathered edge margin → scale to the chosen relief height → 16-bit heightmap + 8-bit
+   scale to the chosen relief height → 16-bit heightmap + 8-bit
    preview + a manufacturability report (coverage %, relief volume, estimated silver
    weight, warnings).
 3. Moving a slider re-runs step 2 against the **cached** candidate image — the image
    model is never called again after the initial generation.
-4. The frontend (`static/main.js`, Three.js, no build step) samples the 8-bit preview
-   into a ~400x340 vertex grid, displaces a plane, and recomputes normals — polished
+4. The frontend (`static/main.js`, Three.js, no build step) applies the 8-bit preview
+   to the relief ring (see "Where the design goes") and recomputes normals — polished
    with `MeshStandardMaterial` (metalness 1, roughness 0.05) in a photo-studio HDRI
-   (see "Metal look" below). The exaggeration slider only scales the *displayed* mesh; exports always
-   use the true (max 0.4mm) relief height. The face plate sits on a stylized torus
-   band (see "The 3D ring preview" below) so its small scale reads clearly.
+   (see "Metal look" below). The exaggeration slider only scales the *displayed* mesh;
+   exports always use the true (max 0.4mm) relief height.
 
 ### Crop, pan & zoom
 
@@ -139,36 +144,6 @@ fresh against the cached full image every time (`app/imaging.py::cover_fit_resiz
 adjusting them never re-calls the image model, and the on-screen crop box is computed
 with the exact same math as the backend (`computeCropGeometry` in `main.js` mirrors
 `cover_fit_resize` in Python) so what you see is what gets cropped.
-
-### The 3D ring preview
-
-The viewer attaches the face to a torus band (`RING_DIAMETER_MM` = 18mm, a plausible
-finger size) purely so the face's real scale is obvious next to something recognizably
-ring-sized — **this is not a manufacturing model of the shank.** The exported heightmap
-and STL only ever describe the flat face; the manufacturer determines the actual
-band/shank/finger-size geometry separately and fuses or engraves the face pattern onto it.
-
-The face itself is a rounded-rectangle "cushion" slab with slightly bulged sides
-(`ExtrudeGeometry` over a rounded-rect `Shape`), sitting flat (unchanged from the very
-first version of this viewer — the relief mesh has always sat at y=0, and still does).
-The band and both shoulders are ONE continuous swept mesh (`buildShankGeometry` in
-`main.js`, not separate pieces — an earlier version built them as separate objects and
-it showed as a visible seam/lighting discontinuity where they met). Cross-section is
-circular around the bottom of the band and blends into a broad, gently fluted, fairly
-flat fan shape near the top, embedding into the table's side edges.
-
-Critically, **the band's loop lies in a vertical plane** (hole axis horizontal, on Z),
-like a ring actually worn on a finger — not lying flat on its side (an earlier version
-had this wrong: the whole assembly was coplanar/horizontal, which reads as "not a ring
-shape" from a side profile, since there's no vertical drop from the table down to the
-band). The table's own flat/horizontal orientation is correct and unchanged; only the
-band's plane was wrong. This was modeled against real signet ring reference photos
-(rounded cushion face, fluted tapered shoulders, chunky rounded band, vertical band
-loop) rather than guessed from scratch, including a couple of rounds of fixing
-self-intersecting/spiky geometry that showed up from certain camera angles during
-development — worth knowing if you tune the shoulder parameters further, since a plain
-linear blend of the sweep path toward a fixed attachment point can make the centerline
-fold back on itself.
 
 ### Style presets
 
@@ -249,9 +224,9 @@ processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `mod
   request, by design, to keep cost predictable), rather than a batch id you then index
   into. This is what makes "re-processing never re-calls the image model" simple: the
   candidate image is just sitting in that folder already.
-- The edge-margin **feather is intentionally continuous** even when `levels >= 2`
-  (tiered/quantized mode) — the spec asks for a 0.3mm feather, which is inherently a
-  ramp, not a hard cutoff. Only the *interior* (inset past margin+feather) is guaranteed
+- There is no edge margin by default (`EDGE_MARGIN_MM = 0`): the design runs right to the
+  face's edge and is never clipped to its outline. If a margin is configured, its feather
+  is intentionally continuous even when `levels >= 2` — only the interior is guaranteed
   to have exactly N discrete levels; this is covered by `tests/test_processing.py`.
 - Generated images are requested at the face aspect ratio, snapped to whichever of
   OpenAI's fixed output sizes (1024x1024 / 1536x1024 / 1024x1536) is closest, and kept
@@ -261,15 +236,9 @@ processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `mod
 - The crop box's default (`zoom=1, offset=(0,0)`) reproduces the old fixed
   cover-fit-and-crop behavior exactly, so an unadjusted candidate processes identically
   to before this feature existed.
-- The 3D ring band (torus, `RING_DIAMETER_MM`/`RING_BAND_THICKNESS_MM`) is a
-  proportional visual aid only — picked to make the face's small scale legible, not
-  derived from any real ring-sizing standard or sent to a manufacturer.
 - No path traversal protection was needed beyond validating design ids are the uuid4 hex
   strings we generate ourselves (`storage._safe_id`), since there's no auth/multi-tenant
   concern in this MVP.
-- The 3D viewer's bezel (rim width, slab thickness) is a fixed cosmetic choice (1.6mm)
-  to suggest a ring band visually — it's independent of the STL export's
-  `BASE_THICKNESS_MM` (1.0mm) constant, which is what actually gets exported.
 - Weight/volume in the report account for the **relief only** (matches the spec), not the
   base plate — a real ring's total silver weight would also include the plain base slab
   and shank, which are out of scope for this MVP.
@@ -283,8 +252,8 @@ processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `mod
   content. That's expected; it exists purely so the app/tests work with zero setup.
 - The STL export downsamples the heightmap grid for a manageable file size/face count;
   it's a preview-quality mesh, not a full-resolution manufacturing file.
-- The 3D ring band is a stylized proportional preview (see "The 3D ring preview" above),
-  not a CAD-accurate shank — only the face relief is ever exported.
+- Designs are applied to one ring (S Square) so far; the other 189 rings show without one.
+- Only the face relief is ever exported (as a rectangular slab STL), not the ring it sits on.
 
 ## Metal look
 

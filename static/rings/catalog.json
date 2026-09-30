@@ -1,0 +1,1982 @@
+{
+ "shapes": [
+  {
+   "id": "Circle",
+   "base": "Circle",
+   "ridged": false,
+   "sizes": [
+    {
+     "size": "H",
+     "file": "Circle/H.glb",
+     "inner_diameter_mm": 14.69,
+     "extent_mm": [
+      18.63,
+      20.26,
+      14.0
+     ]
+    },
+    {
+     "size": "I",
+     "file": "Circle/I.glb",
+     "inner_diameter_mm": 15.09,
+     "extent_mm": [
+      19.03,
+      20.66,
+      14.0
+     ]
+    },
+    {
+     "size": "J",
+     "file": "Circle/J.glb",
+     "inner_diameter_mm": 15.45,
+     "extent_mm": [
+      19.39,
+      21.03,
+      14.0
+     ]
+    },
+    {
+     "size": "K",
+     "file": "Circle/K.glb",
+     "inner_diameter_mm": 15.85,
+     "extent_mm": [
+      19.79,
+      21.44,
+      14.0
+     ]
+    },
+    {
+     "size": "L",
+     "file": "Circle/L.glb",
+     "inner_diameter_mm": 16.15,
+     "extent_mm": [
+      20.09,
+      21.75,
+      14.0
+     ]
+    },
+    {
+     "size": "M",
+     "file": "Circle/M.glb",
+     "inner_diameter_mm": 16.56,
+     "extent_mm": [
+      20.5,
+      22.17,
+      14.0
+     ]
+    },
+    {
+     "size": "N",
+     "file": "Circle/N.glb",
+     "inner_diameter_mm": 16.97,
+     "extent_mm": [
+      20.91,
+      22.59,
+      14.0
+     ]
+    },
+    {
+     "size": "O",
+     "file": "Circle/O.glb",
+     "inner_diameter_mm": 17.4,
+     "extent_mm": [
+      21.34,
+      23.03,
+      14.0
+     ]
+    },
+    {
+     "size": "P",
+     "file": "Circle/P.glb",
+     "inner_diameter_mm": 17.8,
+     "extent_mm": [
+      21.74,
+      23.44,
+      14.0
+     ]
+    },
+    {
+     "size": "Q",
+     "file": "Circle/Q.glb",
+     "inner_diameter_mm": 18.24,
+     "extent_mm": [
+      22.18,
+      23.89,
+      14.0
+     ]
+    },
+    {
+     "size": "R",
+     "file": "Circle/R.glb",
+     "inner_diameter_mm": 18.67,
+     "extent_mm": [
+      22.6,
+      24.32,
+      14.0
+     ]
+    },
+    {
+     "size": "S",
+     "file": "Circle/S.glb",
+     "inner_diameter_mm": 19.16,
+     "extent_mm": [
+      23.09,
+      24.83,
+      14.0
+     ]
+    },
+    {
+     "size": "T",
+     "file": "Circle/T.glb",
+     "inner_diameter_mm": 19.56,
+     "extent_mm": [
+      23.49,
+      25.24,
+      14.0
+     ]
+    },
+    {
+     "size": "U",
+     "file": "Circle/U.glb",
+     "inner_diameter_mm": 20.08,
+     "extent_mm": [
+      24.01,
+      25.77,
+      14.0
+     ]
+    },
+    {
+     "size": "V",
+     "file": "Circle/V.glb",
+     "inner_diameter_mm": 20.36,
+     "extent_mm": [
+      24.29,
+      26.06,
+      14.0
+     ]
+    },
+    {
+     "size": "W",
+     "file": "Circle/W.glb",
+     "inner_diameter_mm": 20.82,
+     "extent_mm": [
+      24.75,
+      26.53,
+      14.0
+     ]
+    },
+    {
+     "size": "X",
+     "file": "Circle/X.glb",
+     "inner_diameter_mm": 21.24,
+     "extent_mm": [
+      25.18,
+      26.96,
+      14.0
+     ]
+    },
+    {
+     "size": "Y",
+     "file": "Circle/Y.glb",
+     "inner_diameter_mm": 21.46,
+     "extent_mm": [
+      25.4,
+      27.19,
+      14.0
+     ]
+    },
+    {
+     "size": "Z",
+     "file": "Circle/Z.glb",
+     "inner_diameter_mm": 21.97,
+     "extent_mm": [
+      25.9,
+      27.7,
+      14.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CircleRidged",
+   "base": "Circle",
+   "ridged": true,
+   "sizes": [
+    {
+     "size": "H",
+     "file": "CircleRidged/H.glb",
+     "inner_diameter_mm": 14.69,
+     "extent_mm": [
+      18.63,
+      20.26,
+      14.0
+     ]
+    },
+    {
+     "size": "I",
+     "file": "CircleRidged/I.glb",
+     "inner_diameter_mm": 15.09,
+     "extent_mm": [
+      19.03,
+      20.66,
+      14.0
+     ]
+    },
+    {
+     "size": "J",
+     "file": "CircleRidged/J.glb",
+     "inner_diameter_mm": 15.45,
+     "extent_mm": [
+      19.39,
+      21.03,
+      14.0
+     ]
+    },
+    {
+     "size": "K",
+     "file": "CircleRidged/K.glb",
+     "inner_diameter_mm": 15.85,
+     "extent_mm": [
+      19.79,
+      21.44,
+      14.0
+     ]
+    },
+    {
+     "size": "L",
+     "file": "CircleRidged/L.glb",
+     "inner_diameter_mm": 16.15,
+     "extent_mm": [
+      20.09,
+      21.75,
+      14.0
+     ]
+    },
+    {
+     "size": "M",
+     "file": "CircleRidged/M.glb",
+     "inner_diameter_mm": 16.56,
+     "extent_mm": [
+      20.5,
+      22.17,
+      14.0
+     ]
+    },
+    {
+     "size": "N",
+     "file": "CircleRidged/N.glb",
+     "inner_diameter_mm": 16.97,
+     "extent_mm": [
+      20.91,
+      22.59,
+      14.0
+     ]
+    },
+    {
+     "size": "O",
+     "file": "CircleRidged/O.glb",
+     "inner_diameter_mm": 17.4,
+     "extent_mm": [
+      21.34,
+      23.03,
+      14.0
+     ]
+    },
+    {
+     "size": "P",
+     "file": "CircleRidged/P.glb",
+     "inner_diameter_mm": 17.8,
+     "extent_mm": [
+      21.74,
+      23.44,
+      14.0
+     ]
+    },
+    {
+     "size": "Q",
+     "file": "CircleRidged/Q.glb",
+     "inner_diameter_mm": 18.24,
+     "extent_mm": [
+      22.18,
+      23.89,
+      14.0
+     ]
+    },
+    {
+     "size": "R",
+     "file": "CircleRidged/R.glb",
+     "inner_diameter_mm": 18.67,
+     "extent_mm": [
+      22.6,
+      24.32,
+      14.0
+     ]
+    },
+    {
+     "size": "S",
+     "file": "CircleRidged/S.glb",
+     "inner_diameter_mm": 19.16,
+     "extent_mm": [
+      23.09,
+      24.83,
+      14.0
+     ]
+    },
+    {
+     "size": "T",
+     "file": "CircleRidged/T.glb",
+     "inner_diameter_mm": 19.56,
+     "extent_mm": [
+      23.49,
+      25.24,
+      14.0
+     ]
+    },
+    {
+     "size": "U",
+     "file": "CircleRidged/U.glb",
+     "inner_diameter_mm": 20.08,
+     "extent_mm": [
+      24.01,
+      25.77,
+      14.0
+     ]
+    },
+    {
+     "size": "V",
+     "file": "CircleRidged/V.glb",
+     "inner_diameter_mm": 20.36,
+     "extent_mm": [
+      24.29,
+      26.06,
+      14.0
+     ]
+    },
+    {
+     "size": "W",
+     "file": "CircleRidged/W.glb",
+     "inner_diameter_mm": 20.82,
+     "extent_mm": [
+      24.75,
+      26.53,
+      14.0
+     ]
+    },
+    {
+     "size": "X",
+     "file": "CircleRidged/X.glb",
+     "inner_diameter_mm": 21.24,
+     "extent_mm": [
+      25.18,
+      26.96,
+      14.0
+     ]
+    },
+    {
+     "size": "Y",
+     "file": "CircleRidged/Y.glb",
+     "inner_diameter_mm": 21.46,
+     "extent_mm": [
+      25.4,
+      27.19,
+      14.0
+     ]
+    },
+    {
+     "size": "Z",
+     "file": "CircleRidged/Z.glb",
+     "inner_diameter_mm": 21.97,
+     "extent_mm": [
+      25.9,
+      27.7,
+      14.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "Oval",
+   "base": "Oval",
+   "ridged": false,
+   "sizes": [
+    {
+     "size": "H",
+     "file": "Oval/H.glb",
+     "inner_diameter_mm": 14.69,
+     "extent_mm": [
+      18.63,
+      20.25,
+      16.56
+     ]
+    },
+    {
+     "size": "I",
+     "file": "Oval/I.glb",
+     "inner_diameter_mm": 15.09,
+     "extent_mm": [
+      19.02,
+      20.66,
+      16.56
+     ]
+    },
+    {
+     "size": "J",
+     "file": "Oval/J.glb",
+     "inner_diameter_mm": 15.45,
+     "extent_mm": [
+      19.38,
+      21.03,
+      16.56
+     ]
+    },
+    {
+     "size": "K",
+     "file": "Oval/K.glb",
+     "inner_diameter_mm": 15.85,
+     "extent_mm": [
+      19.78,
+      21.44,
+      16.56
+     ]
+    },
+    {
+     "size": "L",
+     "file": "Oval/L.glb",
+     "inner_diameter_mm": 16.15,
+     "extent_mm": [
+      20.08,
+      21.75,
+      16.56
+     ]
+    },
+    {
+     "size": "M",
+     "file": "Oval/M.glb",
+     "inner_diameter_mm": 16.56,
+     "extent_mm": [
+      20.49,
+      22.17,
+      16.56
+     ]
+    },
+    {
+     "size": "N",
+     "file": "Oval/N.glb",
+     "inner_diameter_mm": 16.97,
+     "extent_mm": [
+      20.91,
+      22.59,
+      16.56
+     ]
+    },
+    {
+     "size": "O",
+     "file": "Oval/O.glb",
+     "inner_diameter_mm": 17.4,
+     "extent_mm": [
+      21.34,
+      23.03,
+      16.56
+     ]
+    },
+    {
+     "size": "P",
+     "file": "Oval/P.glb",
+     "inner_diameter_mm": 17.8,
+     "extent_mm": [
+      21.74,
+      23.44,
+      16.56
+     ]
+    },
+    {
+     "size": "Q",
+     "file": "Oval/Q.glb",
+     "inner_diameter_mm": 18.24,
+     "extent_mm": [
+      22.18,
+      23.89,
+      16.56
+     ]
+    },
+    {
+     "size": "R",
+     "file": "Oval/R.glb",
+     "inner_diameter_mm": 18.67,
+     "extent_mm": [
+      22.6,
+      24.32,
+      16.56
+     ]
+    },
+    {
+     "size": "S",
+     "file": "Oval/S.glb",
+     "inner_diameter_mm": 19.16,
+     "extent_mm": [
+      23.09,
+      24.83,
+      16.56
+     ]
+    },
+    {
+     "size": "T",
+     "file": "Oval/T.glb",
+     "inner_diameter_mm": 19.56,
+     "extent_mm": [
+      23.49,
+      25.24,
+      16.56
+     ]
+    },
+    {
+     "size": "U",
+     "file": "Oval/U.glb",
+     "inner_diameter_mm": 20.08,
+     "extent_mm": [
+      24.01,
+      25.77,
+      16.56
+     ]
+    },
+    {
+     "size": "V",
+     "file": "Oval/V.glb",
+     "inner_diameter_mm": 20.36,
+     "extent_mm": [
+      24.29,
+      26.06,
+      16.56
+     ]
+    },
+    {
+     "size": "W",
+     "file": "Oval/W.glb",
+     "inner_diameter_mm": 20.82,
+     "extent_mm": [
+      24.75,
+      26.53,
+      16.56
+     ]
+    },
+    {
+     "size": "X",
+     "file": "Oval/X.glb",
+     "inner_diameter_mm": 21.24,
+     "extent_mm": [
+      25.17,
+      26.96,
+      16.56
+     ]
+    },
+    {
+     "size": "Y",
+     "file": "Oval/Y.glb",
+     "inner_diameter_mm": 21.46,
+     "extent_mm": [
+      25.39,
+      27.19,
+      16.56
+     ]
+    },
+    {
+     "size": "Z",
+     "file": "Oval/Z.glb",
+     "inner_diameter_mm": 21.97,
+     "extent_mm": [
+      25.9,
+      27.7,
+      16.56
+     ]
+    }
+   ]
+  },
+  {
+   "id": "OvalRidged",
+   "base": "Oval",
+   "ridged": true,
+   "sizes": [
+    {
+     "size": "H",
+     "file": "OvalRidged/H.glb",
+     "inner_diameter_mm": 14.69,
+     "extent_mm": [
+      18.63,
+      20.24,
+      16.56
+     ]
+    },
+    {
+     "size": "I",
+     "file": "OvalRidged/I.glb",
+     "inner_diameter_mm": 15.09,
+     "extent_mm": [
+      19.02,
+      20.66,
+      16.56
+     ]
+    },
+    {
+     "size": "J",
+     "file": "OvalRidged/J.glb",
+     "inner_diameter_mm": 15.45,
+     "extent_mm": [
+      19.38,
+      21.03,
+      16.56
+     ]
+    },
+    {
+     "size": "K",
+     "file": "OvalRidged/K.glb",
+     "inner_diameter_mm": 15.85,
+     "extent_mm": [
+      19.78,
+      21.44,
+      16.56
+     ]
+    },
+    {
+     "size": "L",
+     "file": "OvalRidged/L.glb",
+     "inner_diameter_mm": 16.15,
+     "extent_mm": [
+      20.08,
+      21.75,
+      16.56
+     ]
+    },
+    {
+     "size": "M",
+     "file": "OvalRidged/M.glb",
+     "inner_diameter_mm": 16.56,
+     "extent_mm": [
+      20.49,
+      22.17,
+      16.56
+     ]
+    },
+    {
+     "size": "N",
+     "file": "OvalRidged/N.glb",
+     "inner_diameter_mm": 16.97,
+     "extent_mm": [
+      20.91,
+      22.59,
+      16.56
+     ]
+    },
+    {
+     "size": "O",
+     "file": "OvalRidged/O.glb",
+     "inner_diameter_mm": 17.4,
+     "extent_mm": [
+      21.34,
+      23.03,
+      16.56
+     ]
+    },
+    {
+     "size": "P",
+     "file": "OvalRidged/P.glb",
+     "inner_diameter_mm": 17.8,
+     "extent_mm": [
+      21.74,
+      23.44,
+      16.56
+     ]
+    },
+    {
+     "size": "Q",
+     "file": "OvalRidged/Q.glb",
+     "inner_diameter_mm": 18.24,
+     "extent_mm": [
+      22.18,
+      23.89,
+      16.56
+     ]
+    },
+    {
+     "size": "R",
+     "file": "OvalRidged/R.glb",
+     "inner_diameter_mm": 18.67,
+     "extent_mm": [
+      22.6,
+      24.32,
+      16.56
+     ]
+    },
+    {
+     "size": "S",
+     "file": "OvalRidged/S.glb",
+     "inner_diameter_mm": 19.16,
+     "extent_mm": [
+      23.09,
+      24.83,
+      16.56
+     ]
+    },
+    {
+     "size": "T",
+     "file": "OvalRidged/T.glb",
+     "inner_diameter_mm": 19.56,
+     "extent_mm": [
+      23.49,
+      25.24,
+      16.56
+     ]
+    },
+    {
+     "size": "U",
+     "file": "OvalRidged/U.glb",
+     "inner_diameter_mm": 20.08,
+     "extent_mm": [
+      24.01,
+      25.77,
+      16.56
+     ]
+    },
+    {
+     "size": "V",
+     "file": "OvalRidged/V.glb",
+     "inner_diameter_mm": 20.36,
+     "extent_mm": [
+      24.29,
+      26.06,
+      16.56
+     ]
+    },
+    {
+     "size": "W",
+     "file": "OvalRidged/W.glb",
+     "inner_diameter_mm": 20.82,
+     "extent_mm": [
+      24.75,
+      26.53,
+      16.56
+     ]
+    },
+    {
+     "size": "X",
+     "file": "OvalRidged/X.glb",
+     "inner_diameter_mm": 21.24,
+     "extent_mm": [
+      25.17,
+      26.96,
+      16.56
+     ]
+    },
+    {
+     "size": "Y",
+     "file": "OvalRidged/Y.glb",
+     "inner_diameter_mm": 21.46,
+     "extent_mm": [
+      25.39,
+      27.19,
+      16.56
+     ]
+    },
+    {
+     "size": "Z",
+     "file": "OvalRidged/Z.glb",
+     "inner_diameter_mm": 21.97,
+     "extent_mm": [
+      25.9,
+      27.7,
+      16.56
+     ]
+    }
+   ]
+  },
+  {
+   "id": "Square",
+   "base": "Square",
+   "ridged": false,
+   "sizes": [
+    {
+     "size": "H",
+     "file": "Square/H.glb",
+     "inner_diameter_mm": 14.69,
+     "extent_mm": [
+      18.63,
+      20.26,
+      14.0
+     ]
+    },
+    {
+     "size": "I",
+     "file": "Square/I.glb",
+     "inner_diameter_mm": 15.09,
+     "extent_mm": [
+      19.03,
+      20.66,
+      14.0
+     ]
+    },
+    {
+     "size": "J",
+     "file": "Square/J.glb",
+     "inner_diameter_mm": 15.45,
+     "extent_mm": [
+      19.39,
+      21.03,
+      14.0
+     ]
+    },
+    {
+     "size": "K",
+     "file": "Square/K.glb",
+     "inner_diameter_mm": 15.85,
+     "extent_mm": [
+      19.79,
+      21.44,
+      14.0
+     ]
+    },
+    {
+     "size": "L",
+     "file": "Square/L.glb",
+     "inner_diameter_mm": 16.15,
+     "extent_mm": [
+      20.09,
+      21.75,
+      14.0
+     ]
+    },
+    {
+     "size": "M",
+     "file": "Square/M.glb",
+     "inner_diameter_mm": 16.56,
+     "extent_mm": [
+      20.5,
+      22.17,
+      14.0
+     ]
+    },
+    {
+     "size": "N",
+     "file": "Square/N.glb",
+     "inner_diameter_mm": 16.97,
+     "extent_mm": [
+      20.91,
+      22.59,
+      14.0
+     ]
+    },
+    {
+     "size": "O",
+     "file": "Square/O.glb",
+     "inner_diameter_mm": 17.4,
+     "extent_mm": [
+      21.34,
+      23.03,
+      14.0
+     ]
+    },
+    {
+     "size": "P",
+     "file": "Square/P.glb",
+     "inner_diameter_mm": 17.8,
+     "extent_mm": [
+      21.74,
+      23.44,
+      14.0
+     ]
+    },
+    {
+     "size": "Q",
+     "file": "Square/Q.glb",
+     "inner_diameter_mm": 18.24,
+     "extent_mm": [
+      22.18,
+      23.89,
+      14.0
+     ]
+    },
+    {
+     "size": "R",
+     "file": "Square/R.glb",
+     "inner_diameter_mm": 18.67,
+     "extent_mm": [
+      22.6,
+      24.32,
+      14.0
+     ]
+    },
+    {
+     "size": "S",
+     "file": "Square/S.glb",
+     "inner_diameter_mm": 19.16,
+     "extent_mm": [
+      23.09,
+      24.83,
+      14.0
+     ]
+    },
+    {
+     "size": "T",
+     "file": "Square/T.glb",
+     "inner_diameter_mm": 19.56,
+     "extent_mm": [
+      23.49,
+      25.24,
+      14.0
+     ]
+    },
+    {
+     "size": "U",
+     "file": "Square/U.glb",
+     "inner_diameter_mm": 20.08,
+     "extent_mm": [
+      24.01,
+      25.77,
+      14.0
+     ]
+    },
+    {
+     "size": "V",
+     "file": "Square/V.glb",
+     "inner_diameter_mm": 20.36,
+     "extent_mm": [
+      24.29,
+      26.06,
+      14.0
+     ]
+    },
+    {
+     "size": "W",
+     "file": "Square/W.glb",
+     "inner_diameter_mm": 20.82,
+     "extent_mm": [
+      24.75,
+      26.53,
+      14.0
+     ]
+    },
+    {
+     "size": "X",
+     "file": "Square/X.glb",
+     "inner_diameter_mm": 21.24,
+     "extent_mm": [
+      25.18,
+      26.96,
+      14.0
+     ]
+    },
+    {
+     "size": "Y",
+     "file": "Square/Y.glb",
+     "inner_diameter_mm": 21.46,
+     "extent_mm": [
+      25.4,
+      27.19,
+      14.0
+     ]
+    },
+    {
+     "size": "Z",
+     "file": "Square/Z.glb",
+     "inner_diameter_mm": 21.97,
+     "extent_mm": [
+      25.9,
+      27.7,
+      14.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "SquareRidged",
+   "base": "Square",
+   "ridged": true,
+   "sizes": [
+    {
+     "size": "H",
+     "file": "SquareRidged/H.glb",
+     "inner_diameter_mm": 14.69,
+     "extent_mm": [
+      18.63,
+      20.26,
+      14.0
+     ]
+    },
+    {
+     "size": "I",
+     "file": "SquareRidged/I.glb",
+     "inner_diameter_mm": 15.09,
+     "extent_mm": [
+      19.03,
+      20.66,
+      14.0
+     ]
+    },
+    {
+     "size": "J",
+     "file": "SquareRidged/J.glb",
+     "inner_diameter_mm": 15.45,
+     "extent_mm": [
+      19.39,
+      21.03,
+      14.0
+     ]
+    },
+    {
+     "size": "K",
+     "file": "SquareRidged/K.glb",
+     "inner_diameter_mm": 15.85,
+     "extent_mm": [
+      19.79,
+      21.44,
+      14.0
+     ]
+    },
+    {
+     "size": "L",
+     "file": "SquareRidged/L.glb",
+     "inner_diameter_mm": 16.15,
+     "extent_mm": [
+      20.09,
+      21.75,
+      14.0
+     ]
+    },
+    {
+     "size": "M",
+     "file": "SquareRidged/M.glb",
+     "inner_diameter_mm": 16.56,
+     "extent_mm": [
+      20.5,
+      22.17,
+      14.0
+     ]
+    },
+    {
+     "size": "N",
+     "file": "SquareRidged/N.glb",
+     "inner_diameter_mm": 16.97,
+     "extent_mm": [
+      20.91,
+      22.59,
+      14.0
+     ]
+    },
+    {
+     "size": "O",
+     "file": "SquareRidged/O.glb",
+     "inner_diameter_mm": 17.4,
+     "extent_mm": [
+      21.34,
+      23.03,
+      14.0
+     ]
+    },
+    {
+     "size": "P",
+     "file": "SquareRidged/P.glb",
+     "inner_diameter_mm": 17.8,
+     "extent_mm": [
+      21.74,
+      23.44,
+      14.0
+     ]
+    },
+    {
+     "size": "Q",
+     "file": "SquareRidged/Q.glb",
+     "inner_diameter_mm": 18.24,
+     "extent_mm": [
+      22.18,
+      23.89,
+      14.0
+     ]
+    },
+    {
+     "size": "R",
+     "file": "SquareRidged/R.glb",
+     "inner_diameter_mm": 18.67,
+     "extent_mm": [
+      22.6,
+      24.32,
+      14.0
+     ]
+    },
+    {
+     "size": "S",
+     "file": "SquareRidged/S.glb",
+     "inner_diameter_mm": 19.16,
+     "extent_mm": [
+      23.09,
+      24.83,
+      14.0
+     ]
+    },
+    {
+     "size": "T",
+     "file": "SquareRidged/T.glb",
+     "inner_diameter_mm": 19.56,
+     "extent_mm": [
+      23.49,
+      25.24,
+      14.0
+     ]
+    },
+    {
+     "size": "U",
+     "file": "SquareRidged/U.glb",
+     "inner_diameter_mm": 20.08,
+     "extent_mm": [
+      24.01,
+      25.77,
+      14.0
+     ]
+    },
+    {
+     "size": "V",
+     "file": "SquareRidged/V.glb",
+     "inner_diameter_mm": 20.36,
+     "extent_mm": [
+      24.29,
+      26.06,
+      14.0
+     ]
+    },
+    {
+     "size": "W",
+     "file": "SquareRidged/W.glb",
+     "inner_diameter_mm": 20.82,
+     "extent_mm": [
+      24.75,
+      26.53,
+      14.0
+     ]
+    },
+    {
+     "size": "X",
+     "file": "SquareRidged/X.glb",
+     "inner_diameter_mm": 21.24,
+     "extent_mm": [
+      25.18,
+      26.96,
+      14.0
+     ]
+    },
+    {
+     "size": "Y",
+     "file": "SquareRidged/Y.glb",
+     "inner_diameter_mm": 21.46,
+     "extent_mm": [
+      25.4,
+      27.19,
+      14.0
+     ]
+    },
+    {
+     "size": "Z",
+     "file": "SquareRidged/Z.glb",
+     "inner_diameter_mm": 21.97,
+     "extent_mm": [
+      25.9,
+      27.7,
+      14.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "Rectangle",
+   "base": "Rectangle",
+   "ridged": false,
+   "sizes": [
+    {
+     "size": "H",
+     "file": "Rectangle/H.glb",
+     "inner_diameter_mm": 14.69,
+     "extent_mm": [
+      18.64,
+      20.26,
+      10.0
+     ]
+    },
+    {
+     "size": "I",
+     "file": "Rectangle/I.glb",
+     "inner_diameter_mm": 15.09,
+     "extent_mm": [
+      19.03,
+      20.66,
+      10.0
+     ]
+    },
+    {
+     "size": "J",
+     "file": "Rectangle/J.glb",
+     "inner_diameter_mm": 15.45,
+     "extent_mm": [
+      19.39,
+      21.03,
+      10.0
+     ]
+    },
+    {
+     "size": "K",
+     "file": "Rectangle/K.glb",
+     "inner_diameter_mm": 15.85,
+     "extent_mm": [
+      19.79,
+      21.44,
+      10.0
+     ]
+    },
+    {
+     "size": "L",
+     "file": "Rectangle/L.glb",
+     "inner_diameter_mm": 16.15,
+     "extent_mm": [
+      20.09,
+      21.75,
+      10.0
+     ]
+    },
+    {
+     "size": "M",
+     "file": "Rectangle/M.glb",
+     "inner_diameter_mm": 16.56,
+     "extent_mm": [
+      20.5,
+      22.17,
+      10.0
+     ]
+    },
+    {
+     "size": "N",
+     "file": "Rectangle/N.glb",
+     "inner_diameter_mm": 16.97,
+     "extent_mm": [
+      20.91,
+      22.59,
+      10.0
+     ]
+    },
+    {
+     "size": "O",
+     "file": "Rectangle/O.glb",
+     "inner_diameter_mm": 17.4,
+     "extent_mm": [
+      21.34,
+      23.03,
+      10.0
+     ]
+    },
+    {
+     "size": "P",
+     "file": "Rectangle/P.glb",
+     "inner_diameter_mm": 17.8,
+     "extent_mm": [
+      21.74,
+      23.44,
+      10.0
+     ]
+    },
+    {
+     "size": "Q",
+     "file": "Rectangle/Q.glb",
+     "inner_diameter_mm": 18.24,
+     "extent_mm": [
+      22.18,
+      23.89,
+      10.0
+     ]
+    },
+    {
+     "size": "R",
+     "file": "Rectangle/R.glb",
+     "inner_diameter_mm": 18.67,
+     "extent_mm": [
+      22.6,
+      24.32,
+      10.0
+     ]
+    },
+    {
+     "size": "S",
+     "file": "Rectangle/S.glb",
+     "inner_diameter_mm": 19.16,
+     "extent_mm": [
+      23.09,
+      24.83,
+      10.0
+     ]
+    },
+    {
+     "size": "T",
+     "file": "Rectangle/T.glb",
+     "inner_diameter_mm": 19.56,
+     "extent_mm": [
+      23.49,
+      25.24,
+      10.0
+     ]
+    },
+    {
+     "size": "U",
+     "file": "Rectangle/U.glb",
+     "inner_diameter_mm": 20.08,
+     "extent_mm": [
+      24.02,
+      25.77,
+      10.0
+     ]
+    },
+    {
+     "size": "V",
+     "file": "Rectangle/V.glb",
+     "inner_diameter_mm": 20.36,
+     "extent_mm": [
+      24.3,
+      26.06,
+      10.0
+     ]
+    },
+    {
+     "size": "W",
+     "file": "Rectangle/W.glb",
+     "inner_diameter_mm": 20.82,
+     "extent_mm": [
+      24.76,
+      26.53,
+      10.0
+     ]
+    },
+    {
+     "size": "X",
+     "file": "Rectangle/X.glb",
+     "inner_diameter_mm": 21.24,
+     "extent_mm": [
+      25.18,
+      26.96,
+      10.0
+     ]
+    },
+    {
+     "size": "Y",
+     "file": "Rectangle/Y.glb",
+     "inner_diameter_mm": 21.46,
+     "extent_mm": [
+      25.4,
+      27.19,
+      10.0
+     ]
+    },
+    {
+     "size": "Z",
+     "file": "Rectangle/Z.glb",
+     "inner_diameter_mm": 21.97,
+     "extent_mm": [
+      25.9,
+      27.7,
+      10.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "RectangleRidged",
+   "base": "Rectangle",
+   "ridged": true,
+   "sizes": [
+    {
+     "size": "H",
+     "file": "RectangleRidged/H.glb",
+     "inner_diameter_mm": 14.69,
+     "extent_mm": [
+      18.64,
+      20.26,
+      10.0
+     ]
+    },
+    {
+     "size": "I",
+     "file": "RectangleRidged/I.glb",
+     "inner_diameter_mm": 15.09,
+     "extent_mm": [
+      19.03,
+      20.66,
+      10.0
+     ]
+    },
+    {
+     "size": "J",
+     "file": "RectangleRidged/J.glb",
+     "inner_diameter_mm": 15.45,
+     "extent_mm": [
+      19.39,
+      21.03,
+      10.0
+     ]
+    },
+    {
+     "size": "K",
+     "file": "RectangleRidged/K.glb",
+     "inner_diameter_mm": 15.85,
+     "extent_mm": [
+      19.79,
+      21.44,
+      10.0
+     ]
+    },
+    {
+     "size": "L",
+     "file": "RectangleRidged/L.glb",
+     "inner_diameter_mm": 16.15,
+     "extent_mm": [
+      20.09,
+      21.75,
+      10.0
+     ]
+    },
+    {
+     "size": "M",
+     "file": "RectangleRidged/M.glb",
+     "inner_diameter_mm": 16.56,
+     "extent_mm": [
+      20.5,
+      22.17,
+      10.0
+     ]
+    },
+    {
+     "size": "N",
+     "file": "RectangleRidged/N.glb",
+     "inner_diameter_mm": 16.97,
+     "extent_mm": [
+      20.91,
+      22.59,
+      10.0
+     ]
+    },
+    {
+     "size": "O",
+     "file": "RectangleRidged/O.glb",
+     "inner_diameter_mm": 17.4,
+     "extent_mm": [
+      21.34,
+      23.03,
+      10.0
+     ]
+    },
+    {
+     "size": "P",
+     "file": "RectangleRidged/P.glb",
+     "inner_diameter_mm": 17.8,
+     "extent_mm": [
+      21.74,
+      23.44,
+      10.0
+     ]
+    },
+    {
+     "size": "Q",
+     "file": "RectangleRidged/Q.glb",
+     "inner_diameter_mm": 18.24,
+     "extent_mm": [
+      22.18,
+      23.89,
+      10.0
+     ]
+    },
+    {
+     "size": "R",
+     "file": "RectangleRidged/R.glb",
+     "inner_diameter_mm": 18.67,
+     "extent_mm": [
+      22.6,
+      24.32,
+      10.0
+     ]
+    },
+    {
+     "size": "S",
+     "file": "RectangleRidged/S.glb",
+     "inner_diameter_mm": 19.16,
+     "extent_mm": [
+      23.09,
+      24.83,
+      10.0
+     ]
+    },
+    {
+     "size": "T",
+     "file": "RectangleRidged/T.glb",
+     "inner_diameter_mm": 19.56,
+     "extent_mm": [
+      23.49,
+      25.24,
+      10.0
+     ]
+    },
+    {
+     "size": "U",
+     "file": "RectangleRidged/U.glb",
+     "inner_diameter_mm": 20.08,
+     "extent_mm": [
+      24.02,
+      25.77,
+      10.0
+     ]
+    },
+    {
+     "size": "V",
+     "file": "RectangleRidged/V.glb",
+     "inner_diameter_mm": 20.36,
+     "extent_mm": [
+      24.3,
+      26.06,
+      10.0
+     ]
+    },
+    {
+     "size": "W",
+     "file": "RectangleRidged/W.glb",
+     "inner_diameter_mm": 20.82,
+     "extent_mm": [
+      24.76,
+      26.53,
+      10.0
+     ]
+    },
+    {
+     "size": "X",
+     "file": "RectangleRidged/X.glb",
+     "inner_diameter_mm": 21.24,
+     "extent_mm": [
+      25.18,
+      26.96,
+      10.0
+     ]
+    },
+    {
+     "size": "Y",
+     "file": "RectangleRidged/Y.glb",
+     "inner_diameter_mm": 21.46,
+     "extent_mm": [
+      25.4,
+      27.19,
+      10.0
+     ]
+    },
+    {
+     "size": "Z",
+     "file": "RectangleRidged/Z.glb",
+     "inner_diameter_mm": 21.97,
+     "extent_mm": [
+      25.9,
+      27.7,
+      10.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ThinRectangle",
+   "base": "Thin rectangle",
+   "ridged": false,
+   "sizes": [
+    {
+     "size": "H",
+     "file": "ThinRectangle/H.glb",
+     "inner_diameter_mm": 14.69,
+     "extent_mm": [
+      18.64,
+      19.76,
+      7.0
+     ]
+    },
+    {
+     "size": "I",
+     "file": "ThinRectangle/I.glb",
+     "inner_diameter_mm": 15.09,
+     "extent_mm": [
+      19.03,
+      20.16,
+      7.0
+     ]
+    },
+    {
+     "size": "J",
+     "file": "ThinRectangle/J.glb",
+     "inner_diameter_mm": 15.45,
+     "extent_mm": [
+      19.39,
+      20.53,
+      7.0
+     ]
+    },
+    {
+     "size": "K",
+     "file": "ThinRectangle/K.glb",
+     "inner_diameter_mm": 15.85,
+     "extent_mm": [
+      19.79,
+      20.94,
+      7.0
+     ]
+    },
+    {
+     "size": "L",
+     "file": "ThinRectangle/L.glb",
+     "inner_diameter_mm": 16.15,
+     "extent_mm": [
+      20.09,
+      21.25,
+      7.0
+     ]
+    },
+    {
+     "size": "M",
+     "file": "ThinRectangle/M.glb",
+     "inner_diameter_mm": 16.56,
+     "extent_mm": [
+      20.5,
+      21.67,
+      7.0
+     ]
+    },
+    {
+     "size": "N",
+     "file": "ThinRectangle/N.glb",
+     "inner_diameter_mm": 16.97,
+     "extent_mm": [
+      20.91,
+      22.09,
+      7.0
+     ]
+    },
+    {
+     "size": "O",
+     "file": "ThinRectangle/O.glb",
+     "inner_diameter_mm": 17.4,
+     "extent_mm": [
+      21.34,
+      22.53,
+      7.0
+     ]
+    },
+    {
+     "size": "P",
+     "file": "ThinRectangle/P.glb",
+     "inner_diameter_mm": 17.8,
+     "extent_mm": [
+      21.74,
+      22.94,
+      7.0
+     ]
+    },
+    {
+     "size": "Q",
+     "file": "ThinRectangle/Q.glb",
+     "inner_diameter_mm": 18.24,
+     "extent_mm": [
+      22.18,
+      23.39,
+      7.0
+     ]
+    },
+    {
+     "size": "R",
+     "file": "ThinRectangle/R.glb",
+     "inner_diameter_mm": 18.67,
+     "extent_mm": [
+      22.6,
+      23.82,
+      7.0
+     ]
+    },
+    {
+     "size": "S",
+     "file": "ThinRectangle/S.glb",
+     "inner_diameter_mm": 19.16,
+     "extent_mm": [
+      23.1,
+      24.33,
+      7.0
+     ]
+    },
+    {
+     "size": "T",
+     "file": "ThinRectangle/T.glb",
+     "inner_diameter_mm": 19.56,
+     "extent_mm": [
+      23.5,
+      24.74,
+      7.0
+     ]
+    },
+    {
+     "size": "U",
+     "file": "ThinRectangle/U.glb",
+     "inner_diameter_mm": 20.08,
+     "extent_mm": [
+      24.02,
+      25.27,
+      7.0
+     ]
+    },
+    {
+     "size": "V",
+     "file": "ThinRectangle/V.glb",
+     "inner_diameter_mm": 20.36,
+     "extent_mm": [
+      24.3,
+      25.56,
+      7.0
+     ]
+    },
+    {
+     "size": "W",
+     "file": "ThinRectangle/W.glb",
+     "inner_diameter_mm": 20.82,
+     "extent_mm": [
+      24.76,
+      26.03,
+      7.0
+     ]
+    },
+    {
+     "size": "X",
+     "file": "ThinRectangle/X.glb",
+     "inner_diameter_mm": 21.24,
+     "extent_mm": [
+      25.18,
+      26.46,
+      7.0
+     ]
+    },
+    {
+     "size": "Y",
+     "file": "ThinRectangle/Y.glb",
+     "inner_diameter_mm": 21.46,
+     "extent_mm": [
+      25.4,
+      26.69,
+      7.0
+     ]
+    },
+    {
+     "size": "Z",
+     "file": "ThinRectangle/Z.glb",
+     "inner_diameter_mm": 21.97,
+     "extent_mm": [
+      25.9,
+      27.2,
+      7.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ThinRectangleRidged",
+   "base": "Thin rectangle",
+   "ridged": true,
+   "sizes": [
+    {
+     "size": "H",
+     "file": "ThinRectangleRidged/H.glb",
+     "inner_diameter_mm": 14.69,
+     "extent_mm": [
+      18.64,
+      19.76,
+      7.0
+     ]
+    },
+    {
+     "size": "I",
+     "file": "ThinRectangleRidged/I.glb",
+     "inner_diameter_mm": 15.09,
+     "extent_mm": [
+      19.03,
+      20.16,
+      7.0
+     ]
+    },
+    {
+     "size": "J",
+     "file": "ThinRectangleRidged/J.glb",
+     "inner_diameter_mm": 15.45,
+     "extent_mm": [
+      19.39,
+      20.53,
+      7.0
+     ]
+    },
+    {
+     "size": "K",
+     "file": "ThinRectangleRidged/K.glb",
+     "inner_diameter_mm": 15.85,
+     "extent_mm": [
+      19.79,
+      20.94,
+      7.0
+     ]
+    },
+    {
+     "size": "L",
+     "file": "ThinRectangleRidged/L.glb",
+     "inner_diameter_mm": 16.15,
+     "extent_mm": [
+      20.09,
+      21.25,
+      7.0
+     ]
+    },
+    {
+     "size": "M",
+     "file": "ThinRectangleRidged/M.glb",
+     "inner_diameter_mm": 16.56,
+     "extent_mm": [
+      20.5,
+      21.67,
+      7.0
+     ]
+    },
+    {
+     "size": "N",
+     "file": "ThinRectangleRidged/N.glb",
+     "inner_diameter_mm": 16.97,
+     "extent_mm": [
+      20.91,
+      22.05,
+      7.0
+     ]
+    },
+    {
+     "size": "O",
+     "file": "ThinRectangleRidged/O.glb",
+     "inner_diameter_mm": 17.4,
+     "extent_mm": [
+      21.34,
+      22.53,
+      7.0
+     ]
+    },
+    {
+     "size": "P",
+     "file": "ThinRectangleRidged/P.glb",
+     "inner_diameter_mm": 17.8,
+     "extent_mm": [
+      21.74,
+      22.94,
+      7.0
+     ]
+    },
+    {
+     "size": "Q",
+     "file": "ThinRectangleRidged/Q.glb",
+     "inner_diameter_mm": 18.24,
+     "extent_mm": [
+      22.18,
+      23.39,
+      7.0
+     ]
+    },
+    {
+     "size": "R",
+     "file": "ThinRectangleRidged/R.glb",
+     "inner_diameter_mm": 18.67,
+     "extent_mm": [
+      22.6,
+      23.82,
+      7.0
+     ]
+    },
+    {
+     "size": "S",
+     "file": "ThinRectangleRidged/S.glb",
+     "inner_diameter_mm": 19.16,
+     "extent_mm": [
+      23.1,
+      24.33,
+      7.0
+     ]
+    },
+    {
+     "size": "T",
+     "file": "ThinRectangleRidged/T.glb",
+     "inner_diameter_mm": 19.56,
+     "extent_mm": [
+      23.5,
+      24.74,
+      7.0
+     ]
+    },
+    {
+     "size": "U",
+     "file": "ThinRectangleRidged/U.glb",
+     "inner_diameter_mm": 20.08,
+     "extent_mm": [
+      24.02,
+      25.27,
+      7.0
+     ]
+    },
+    {
+     "size": "V",
+     "file": "ThinRectangleRidged/V.glb",
+     "inner_diameter_mm": 20.36,
+     "extent_mm": [
+      24.3,
+      25.56,
+      7.0
+     ]
+    },
+    {
+     "size": "W",
+     "file": "ThinRectangleRidged/W.glb",
+     "inner_diameter_mm": 20.82,
+     "extent_mm": [
+      24.76,
+      26.03,
+      7.0
+     ]
+    },
+    {
+     "size": "X",
+     "file": "ThinRectangleRidged/X.glb",
+     "inner_diameter_mm": 21.24,
+     "extent_mm": [
+      25.18,
+      26.46,
+      7.0
+     ]
+    },
+    {
+     "size": "Y",
+     "file": "ThinRectangleRidged/Y.glb",
+     "inner_diameter_mm": 21.46,
+     "extent_mm": [
+      25.4,
+      26.69,
+      7.0
+     ]
+    },
+    {
+     "size": "Z",
+     "file": "ThinRectangleRidged/Z.glb",
+     "inner_diameter_mm": 21.97,
+     "extent_mm": [
+      25.9,
+      27.2,
+      7.0
+     ]
+    }
+   ]
+  }
+ ],
+ "relief": {
+  "shape": "Square",
+  "size": "S"
+ },
+ "default": {
+  "shape": "Square",
+  "size": "S"
+ }
+}

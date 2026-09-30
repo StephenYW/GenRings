@@ -244,9 +244,13 @@ def compute_report(
     px_per_mm: int = config.PX_PER_MM,
     relief_max_mm: float = config.RELIEF_MAX_MM,
     silver_density_g_cm3: float = config.SILVER_DENSITY_G_CM3,
+    region: np.ndarray | None = None,
 ) -> ProcessReport:
     # gray01_final is heightmap_16bit / 65535, i.e. each pixel's actual height
     # as a fraction of RELIEF_MAX_MM (not of the user's chosen relief_height_mm).
+    # `region` (bool mask) limits the stats to the pixels that land on the face.
+    if region is not None:
+        gray01_final = gray01_final[region]
     raised = gray01_final > config.RAISED_THRESHOLD
     coverage_percent = 100.0 * raised.sum() / raised.size
 
@@ -308,28 +312,36 @@ def process_image(img_rgb: np.ndarray, params: ProcessParams, contains_text_requ
 
     gray, min_feature_removed_fraction = enforce_min_feature(gray, params.min_feature_mm, params.levels)
 
-    mask = edge_margin_mask(
-        gray.shape[0], gray.shape[1], params.edge_margin_mm, params.edge_feather_mm
-    )
-    if config.FACE_OUTLINE_MM:
-        mask = mask * outline_margin_mask(
-            gray.shape[0], gray.shape[1], config.FACE_OUTLINE_MM, params.edge_margin_mm, params.edge_feather_mm
+    # The design is never clipped to the face outline: it runs right up to
+    # (and, in the bounding box's corners, past) the rounded rim, and the
+    # viewer carries it over the edge onto the shoulders. A rectangular edge
+    # margin is only applied if one is configured (EDGE_MARGIN_MM, 0 by default).
+    if params.edge_margin_mm > 0:
+        mask = edge_margin_mask(gray.shape[0], gray.shape[1], params.edge_margin_mm, params.edge_feather_mm)
+        raised_before_margin = float((gray > config.RAISED_THRESHOLD).sum())
+        gray_margined = gray * mask
+        raised_after_margin = float((gray_margined > config.RAISED_THRESHOLD).sum())
+        margin_clipped_fraction = (
+            0.0 if raised_before_margin == 0 else max(0.0, (raised_before_margin - raised_after_margin) / raised_before_margin)
         )
-    raised_before_margin = float((gray > config.RAISED_THRESHOLD).sum())
-    gray_margined = gray * mask
-    raised_after_margin = float((gray_margined > config.RAISED_THRESHOLD).sum())
-    margin_clipped_fraction = (
-        0.0 if raised_before_margin == 0 else max(0.0, (raised_before_margin - raised_after_margin) / raised_before_margin)
-    )
+    else:
+        gray_margined = gray
+        margin_clipped_fraction = 0.0
 
     heightmap_16bit = to_heightmap_16bit(gray_margined, params.relief_height_mm)
     preview_8bit = heightmap_to_preview_8bit(heightmap_16bit)
 
     gray01_final = heightmap_16bit.astype(np.float32) / 65535.0
+    # Coverage/volume/weight only count what actually lands on the face.
+    on_face = (
+        outline_margin_mask(gray01_final.shape[0], gray01_final.shape[1], config.FACE_OUTLINE_MM, 0.0, 1e-6) > 0
+        if config.FACE_OUTLINE_MM else None
+    )
     report = compute_report(
         gray01_final,
         min_feature_removed_fraction,
         margin_clipped_fraction,
+        region=on_face,
     )
 
     if contains_text_request:
