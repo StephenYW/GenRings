@@ -14,6 +14,7 @@ const state = {
   previewCanvas: null,     // offscreen canvas holding the current 8-bit preview (grayscale)
   exaggeration: 1,
   faceTiltDeg: 8,         // design area edge: the relief ring's top that tilts less than this (set from relief.json)
+  ridgeShiftMm: 0.3,      // recess rings: how far the ridge's inner wall is slid outward (the "Ridge wall" slider)
   reliefMesh: null,       // the ring mesh that carries the relief (only the relief ring, see RINGS)
   reliefBase: null,       // its undisplaced positions/normals, uv, relief weights and region size
   debounceTimer: null,
@@ -404,9 +405,10 @@ async function selectRing(shape, size) {
         // the ridge's inner wall: (floor-edge vertex below, height up the wall 0..1) per vertex
         wall: geo.attributes._wall ? geo.attributes._wall.array : null,
         nWall: info.wall_vertex_count || 0,
+        // for sliding the ridge's inner wall outward: (signed distance to the floor's edge, outward dx, dz)
+        ridge: geo.attributes._ridge ? geo.attributes._ridge.array : null,
       };
-      state.reliefBase.area = recessArea(state.reliefBase, info);
-      setFaceSize(info.face_width_mm, info.face_height_mm, info.outline_xz_mm);
+      applyRidgeShift(state.reliefBase, info, state.ridgeShiftMm);
     }
     // the heightmap is sized per design area: re-make it for this ring
     if (switched) debouncedRefresh();
@@ -443,21 +445,73 @@ function setFaceSize(widthMm, heightMm, outline) {
  * vertices are the first region_vertex_count; the design fills it up to the
  * ridge with no band transition, so no vertex has an edge link.
  */
-function recessArea(base, info) {
-  const n = base.n, pos = base.pos;
+function recessArea(base, info, shift = 0) {
+  const n = base.n, pos = base.cur || base.pos;
+  const w = info.face_width_mm + 2 * shift, h = info.face_height_mm + 2 * shift;
+  const x0 = info.x0 - shift, z0 = info.z0 - shift;
   const uv = new Float32Array(2 * n);
   for (let i = 0; i < n; i++) {
-    uv[2 * i] = (pos[3 * i] - info.x0) / info.face_width_mm;
-    uv[2 * i + 1] = (pos[3 * i + 2] - info.z0) / info.face_height_mm;
+    uv[2 * i] = (pos[3 * i] - x0) / w;
+    uv[2 * i + 1] = (pos[3 * i + 2] - z0) / h;
   }
   return {
-    entry: { width_mm: info.face_width_mm, height_mm: info.face_height_mm },
+    entry: { width_mm: w, height_mm: h },
     inArea: new Uint8Array(n).fill(1),
     edgeIdx: new Int32Array(n).fill(-1),
     edgeDist: new Float32Array(n),
     uv,
     rim: edgeLoop(pos, []),
   };
+}
+
+/**
+ * How far a point slides outward when the ridge's inner wall is moved out by
+ * `shift`, given its signed distance `s` (seen from above) to the floor's edge
+ * (negative on the floor). The wall and the fillets at its foot and top move
+ * rigidly by `shift`; the floor stretches to follow over the rest of the reach
+ * inside, and the ridge's top and outer side compress over the reach outside,
+ * fading to nothing so the ring's outside is unchanged. The fades are gentle
+ * enough (slope < 1 for shift <= 0.6 mm) that points never pass one another,
+ * so no triangle folds.
+ */
+const RIDGE_RIGID_MM = [-0.45, 0.08]; // floor-edge distances moved rigidly (the fillet, wall and its top fillet)
+function ridgeShiftAt(s, shift, reach) {
+  const [inner, outer] = reach, [r0, r1] = RIDGE_RIGID_MM;
+  if (s <= -inner || s >= outer) return 0;
+  if (s < r0) return shift * smoothstep((s + inner) / (r0 + inner));
+  if (s <= r1) return shift;
+  return shift * (1 - smoothstep((s - r1) / (outer - r1)));
+}
+
+/**
+ * Slide the ridge's inner wall of a recess ring outward by `shift` mm (see
+ * ridgeShiftAt): stores the moved positions as base.cur (displaceFace builds
+ * on them), writes them into the mesh, recomputes the floor's UVs and sizes
+ * the design area (and heightmap) to the widened floor.
+ */
+function applyRidgeShift(base, info, shift) {
+  const cur = Float32Array.from(base.pos);
+  const reach = info.ridge_reach_mm || [0, 0];
+  if (base.ridge && shift > 0) {
+    const rg = base.ridge, count = cur.length / 3;
+    for (let i = 0; i < count; i++) {
+      const sh = ridgeShiftAt(rg[3 * i], shift, reach);
+      if (!sh) continue;
+      cur[3 * i] += rg[3 * i + 1] * sh;
+      cur[3 * i + 2] += rg[3 * i + 2] * sh;
+    }
+  }
+  base.cur = cur;
+  const attr = state.reliefMesh.geometry.attributes.position;
+  attr.array.set(cur);
+  attr.needsUpdate = true;
+  base.area = recessArea(base, info, shift);
+  const sx = (info.face_width_mm + 2 * shift) / info.face_width_mm, sz = (info.face_height_mm + 2 * shift) / info.face_height_mm;
+  setFaceSize(info.face_width_mm + 2 * shift, info.face_height_mm + 2 * shift,
+    info.outline_xz_mm && info.outline_xz_mm.map(([x, z]) => [x * sx, z * sz]));
+  const t = info.ridge_thickness_mm;
+  document.getElementById("ridgeShiftVal").textContent =
+    `${t ? (t - shift).toFixed(2) + " mm thick" : shift.toFixed(2) + " mm out"} · floor ${(info.face_width_mm + 2 * shift).toFixed(2)} × ${(info.face_height_mm + 2 * shift).toFixed(2)} mm`;
 }
 
 /**
@@ -707,6 +761,7 @@ function syncRingMenu() {
   }
   const info = RINGS.reliefs[`${shape}/${size}`];
   document.getElementById("designTiltGroup").hidden = !(info && info.mode === "tilt");
+  document.getElementById("ridgeGroup").hidden = !(info && info.mode === "recess" && info.ridge_reach_mm);
 }
 
 /**
@@ -808,7 +863,8 @@ function boxBlur(src, w, h, r) {
  * recesses get the oxidized patina (see PATINA).
  */
 function displaceFace() {
-  const { pos: basePos, nrm, n, area, wall, nWall } = state.reliefBase;
+  const { nrm, n, area, wall, nWall } = state.reliefBase;
+  const basePos = state.reliefBase.cur || state.reliefBase.pos; // recess rings: with the ridge wall slid out
   // recess rings move the floor straight up/down, so its edge stays directly
   // under the ridge's wall, which then follows it (below)
   const vertical = RINGS.relief.mode === "recess";
@@ -1136,6 +1192,7 @@ function currentParams() {
     crop_offset_y: state.crop.offsetY,
     relief_ring: RINGS.reliefKey,
     face_tilt_deg: state.faceTiltDeg,
+    ridge_shift_mm: RINGS.relief && RINGS.relief.mode === "recess" ? state.ridgeShiftMm : null,
   };
 }
 
@@ -1264,6 +1321,18 @@ function wireUI(cfg) {
   const tilt = document.getElementById("designTilt");
   tilt.addEventListener("input", () => setDesignTilt(parseFloat(tilt.value), false));
   tilt.addEventListener("change", () => setDesignTilt(parseFloat(tilt.value), true));
+  const ridge = document.getElementById("ridgeShift");
+  ridge.value = state.ridgeShiftMm;
+  const onRidge = (reprocess) => {
+    state.ridgeShiftMm = parseFloat(ridge.value);
+    const base = state.reliefBase, info = RINGS.relief;
+    if (!base || !info || info.mode !== "recess") return;
+    applyRidgeShift(base, info, state.ridgeShiftMm);
+    if (!tiltFrame) tiltFrame = requestAnimationFrame(() => { tiltFrame = 0; updateMeshHeights(); });
+    if (reprocess) debouncedRefresh();
+  };
+  ridge.addEventListener("input", () => onRidge(false));
+  ridge.addEventListener("change", () => onRidge(true));
   const cove = document.getElementById("coveSteepness");
   cove.value = COVE.steepness;
   wireSliderDisplay("coveSteepness");

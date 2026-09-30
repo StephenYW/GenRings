@@ -34,6 +34,11 @@
           <input type="range" id="coveSteepness" min="1" max="8" step="0.5" value="3" />
           <p class="hint">How sharply the band sweeps up into the design's edge.</p>
         </div>
+        <div id="ridgeGroup" hidden>
+          <label for="ridgeShift">Ridge wall: <span id="ridgeShiftVal"></span></label>
+          <input type="range" id="ridgeShift" min="0" max="0.6" step="0.01" value="0.3" />
+          <p class="hint">Slides the ridge's inner wall outward: a thinner rim, more room for the design.</p>
+        </div>
       </section>
 
       <section>
@@ -111,6 +116,6 @@
     </main>
   </div>
 
-  <script type="module" src="/main.js?v=rings5"></script>
+  <script type="module" src="/main.js?v=rings6"></script>
 </body>
 </html>

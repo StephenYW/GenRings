@@ -73,6 +73,11 @@ SHAPES = [  # (folder, base shape label, ridged)
 RELIEF_RINGS = {("Square", "S"): "tilt", ("SquareRidged", "S"): "recess"}
 DEFAULT_RING = ("Square", "S")
 RECESS_MAX_TILT_DEG = 60  # recess: the floor + its fillet, up to where the ridge's inner wall turns vertical
+# recess: how far round the floor's edge the viewer's "ridge wall" slider may
+# slide points (see ridge_frame): the head's top above RIDGE_GATE_BELOW_MM
+# under the floor, from RIDGE_REACH_IN_MM inside the floor's edge to
+# RIDGE_REACH_OUT_MM outside it
+RIDGE_REACH_IN_MM, RIDGE_REACH_OUT_MM, RIDGE_GATE_BELOW_MM = 1.6, 1.1, 0.4
 REFINE_LEVELS = 2       # 0.17 mm source edges -> ~0.04 mm on the face
 ZBUFFER_MM = 0.02       # top-down visibility raster resolution
 DEFAULT_TILT_DEG = 8    # the design area: the top that tilts less than this (the viewer's slider starts here)
@@ -378,6 +383,63 @@ def build_relief(v: np.ndarray, f: np.ndarray):
     return v, f, info
 
 
+def ridge_frame(v, f_floor, x0, z0, floor_y):
+    """For the viewer's "ridge wall" slider: each point on top of the head
+    near the floor's edge gets (s, dx, dz) -- its signed distance seen from
+    above to the floor's edge (the foot of the ridge's inner wall; negative
+    inside the floor) and the outward direction there. Both come from a
+    smoothed signed-distance map of the floor's footprint (its gradient is the
+    outward direction), so they vary smoothly -- even up the vertical wall,
+    whose points all sit over the same edge. The viewer slides the wall
+    outward by moving these points along (dx, dz) by an amount that is
+    constant near the wall and fades smoothly to 0 across the floor and the
+    ridge's outer side, so points keep their order and no triangle flips.
+    Other vertices get s = 1e3. Also returns the ridge's thickness at floor
+    level (inner wall to the head's outer side)."""
+    res = ZBUFFER_MM
+    pad = int((RIDGE_REACH_OUT_MM + 0.5) / res)
+    fp = v[f_floor][:, :, [0, 2]]
+    W = int((fp[..., 0].max() - x0) / res) + 2 * pad + 2
+    H = int((fp[..., 1].max() - z0) / res) + 2 * pad + 2
+    ox, oz = x0 - pad * res, z0 - pad * res
+    mask = np.zeros((H, W), np.uint8)
+    px = np.round(np.c_[(fp[..., 0].ravel() - ox) / res, (fp[..., 1].ravel() - oz) / res]).astype(np.int32).reshape(-1, 3, 2)
+    for tri in px:
+        cv2.fillConvexPoly(mask, tri, 1)
+    sdf = (cv2.distanceTransform(1 - mask, cv2.DIST_L2, 5) - cv2.distanceTransform(mask, cv2.DIST_L2, 5)) * res
+    sdf = sdf.astype(np.float32)
+    # the outward direction comes from a much smoother copy: the pixel
+    # staircase along the rounded corners would otherwise tilt neighbouring
+    # directions differently enough for rigidly moved points to cross
+    gz, gx = np.gradient(cv2.GaussianBlur(sdf, (0, 0), 0.3 / res))
+    sdf = cv2.GaussianBlur(sdf, (0, 0), 2.0)
+
+    def sample(grid, x, z):
+        fx = np.clip((x - ox) / res, 0, W - 1.001)
+        fz = np.clip((z - oz) / res, 0, H - 1.001)
+        i0, j0 = fz.astype(int), fx.astype(int)
+        tz, tx = fz - i0, fx - j0
+        return ((grid[i0, j0] * (1 - tx) + grid[i0, j0 + 1] * tx) * (1 - tz)
+                + (grid[i0 + 1, j0] * (1 - tx) + grid[i0 + 1, j0 + 1] * tx) * tz)
+
+    attr = np.zeros((len(v), 3))
+    attr[:, 0] = 1e3
+    cand = np.where(v[:, 1] > floor_y - RIDGE_GATE_BELOW_MM)[0]
+    x, z = v[cand, 0], v[cand, 2]
+    s_ = sample(sdf, x, z)
+    dx, dz = sample(gx, x, z), sample(gz, x, z)
+    norm = np.maximum(np.hypot(dx, dz), 1e-9)
+    keep = (s_ > -RIDGE_REACH_IN_MM) & (s_ < RIDGE_REACH_OUT_MM) & (norm > 1e-6)
+    idx = cand[keep]
+    attr[idx, 0], attr[idx, 1], attr[idx, 2] = s_[keep], (dx / norm)[keep], (dz / norm)[keep]
+
+    band = (np.abs(v[:, 2]) < 0.1) & (np.abs(v[:, 1] - floor_y) < 0.06) & (v[:, 0] > 0)
+    wall_x = fp[..., 0].max()
+    thick = float(v[band, 0].max() - wall_x) if band.any() else 0.0
+    print(f"  ridge frame: {keep.sum()} vertices; ridge {thick:.2f} mm thick at floor level")
+    return attr, thick
+
+
 def build_recess(v: np.ndarray, f: np.ndarray):
     """The recessed floor inside a ridged ring's ridge: refine it, order it
     first, and measure its box and outline from above. Returns (verts, faces, info)."""
@@ -452,7 +514,9 @@ def build_recess(v: np.ndarray, f: np.ndarray):
     for tri in f[:n_faces]:
         cv2.fillConvexPoly(mask, px[tri], 1)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    c = cv2.approxPolyDP(max(contours, key=cv2.contourArea), 1.0, True).reshape(-1, 2)
+    contour = max(contours, key=cv2.contourArea)
+    ridge_attr, ridge_thick = ridge_frame(v, f[:n_faces], x0, z0, float(np.median(rv[:, 1])))
+    c = cv2.approxPolyDP(contour, 1.0, True).reshape(-1, 2)
     outline = [[round(float((p[0] - 1) * ZBUFFER_MM - w / 2), 3), round(float((p[1] - 1) * ZBUFFER_MM - h / 2), 3)] for p in c]
     print(f"  refined: {len(f)} faces ({n_faces} floor, {n_wall_faces} wall), {len(v)} vertices; "
           f"floor {w:.2f} x {h:.2f} mm; wall {top_y - base_y.mean():.2f} mm tall")
@@ -465,13 +529,15 @@ def build_recess(v: np.ndarray, f: np.ndarray):
         "region_vertex_count": n_region,
         "region_face_count": n_faces,
         "wall_vertex_count": n_wall,
+        "ridge_thickness_mm": round(ridge_thick, 3),   # the ridge's thickness at floor level (inner wall to outer side)
+        "ridge_reach_mm": [RIDGE_REACH_IN_MM, RIDGE_REACH_OUT_MM],
         # the viewer lifts the design so its highest point sits at the wall top
         "floor_y_mm": round(float(np.median(v[:n_region, 1])), 4),
         "wall_top_y_mm": round(float(top_y), 4),
         "max_tilt_deg": RECESS_MAX_TILT_DEG,
         "uv": "top-down: u = (x - x0) / face_width_mm ; v = (z - z0) / face_height_mm ; image row 0 at -Z",
     }
-    return v, f, info, wall_attr
+    return v, f, info, wall_attr, ridge_attr
 
 
 # --- main ------------------------------------------------------------------------
@@ -513,8 +579,8 @@ def main() -> None:
                     v, f, info = build_relief(v, f)
                     write_glb(OUT_DIR / rel, f"{size}_{folder}", v, f)
                 else:
-                    v, f, info, wall_attr = build_recess(v, f)
-                    write_glb(OUT_DIR / rel, f"{size}_{folder}", v, f, {"_WALL": wall_attr})
+                    v, f, info, wall_attr, ridge_attr = build_recess(v, f)
+                    write_glb(OUT_DIR / rel, f"{size}_{folder}", v, f, {"_WALL": wall_attr, "_RIDGE": ridge_attr})
                 info.update({"shape": folder, "size": size, "file": rel, "inner_diameter_mm": round(dia, 3),
                              "vertex_count": len(v)})
                 reliefs[f"{folder}/{size}"] = info

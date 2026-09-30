@@ -120,6 +120,18 @@ foot follows that floor edge and its top stays at the ridge: when the design sin
 floor (e.g. dark edges with the preview exaggeration up), the wall reaches down to meet
 it instead of floating. There is no band transition outside the ridge.
 
+The **Ridge wall** slider (shown on this ring; 0–0.6mm, default 0.3mm) slides the ridge's
+inner wall outward: a thinner rim and a bigger floor for the design (at 0.3mm the rim goes
+from 1.22mm to 0.92mm thick and the floor from 11.94mm to 12.54mm across). The mesh is
+never cut or remeshed: the prep script gives each point on top of the head near the floor's
+edge a signed distance to that edge and an outward direction (`_ridge`, from a smoothed
+signed-distance map of the floor's footprint), and the viewer (`ridgeShiftAt`) slides
+points outward along it — rigidly for the wall and its fillets, fading smoothly to nothing
+across the floor (which stretches) and the ridge's top and outer side (which compress), so
+the ring's outside is unchanged. Points never pass one another, so no triangle flips
+(checked up to 0.6mm; it starts to fold past ~0.7mm). The design area, heightmap
+(`ridge_shift_mm` on `/api/process`) and crop box grow with the floor.
+
 **S Square — "tilt".** The design goes on its flat top: the triangles visible from straight above (a top-down
 z-buffer) that tilt less than an angle you set live with the **Design area** slider under
 the ring menu (0.5°–30°, default `DEFAULT_TILT_DEG` = 8°). Lower keeps the design on the

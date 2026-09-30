@@ -35,10 +35,12 @@ FACE_HEIGHT_MM = float(_face_info.get("face_height_mm", 12.0))
 FACE_OUTLINE_MM = _face_info.get("outline_xz_mm")
 
 
-def face_geometry(ring=None, tilt_deg=None):
+def face_geometry(ring=None, tilt_deg=None, ridge_shift_mm=None):
     """(width_mm, height_mm, outline) of a design ring's design area. For a
     "tilt" ring, at the nearest tabulated angle to tilt_deg (its default if
-    None). Unknown rings get the defaults."""
+    None). For a "recess" ring, with its ridge's inner wall slid outward by
+    ridge_shift_mm (the viewer's "ridge wall" slider), which widens the floor
+    by that much on every side. Unknown rings get the defaults."""
     info = RELIEF_RINGS.get(ring or DEFAULT_RELIEF_RING)
     if not info:
         return FACE_WIDTH_MM, FACE_HEIGHT_MM, FACE_OUTLINE_MM
@@ -47,7 +49,12 @@ def face_geometry(ring=None, tilt_deg=None):
         deg = info.get("default_tilt_deg") if tilt_deg is None else tilt_deg
         e = min(table, key=lambda t: abs(t["deg"] - deg))
         return e["width_mm"], e["height_mm"], e["outline_xz_mm"]
-    return info["face_width_mm"], info["face_height_mm"], info.get("outline_xz_mm")
+    w, h, outline = info["face_width_mm"], info["face_height_mm"], info.get("outline_xz_mm")
+    shift = max(0.0, float(ridge_shift_mm or 0.0))
+    if shift and outline:
+        sx, sz = (w + 2 * shift) / w, (h + 2 * shift) / h
+        outline = [[x * sx, z * sz] for x, z in outline]
+    return w + 2 * shift, h + 2 * shift, outline
 
 # --- Heightmap resolution ---------------------------------------------------
 PX_PER_MM = 50

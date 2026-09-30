@@ -66,6 +66,9 @@ class ProcessRequest(BaseModel):
     # design area (the viewer's slider; None = its default).
     relief_ring: Optional[str] = None
     face_tilt_deg: Optional[float] = None
+    # For a "recess" ring: how far its ridge's inner wall is slid outward (mm),
+    # which widens the floor the design fills (the viewer's "ridge wall" slider).
+    ridge_shift_mm: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
 class ReportOut(BaseModel):
@@ -233,7 +236,7 @@ def process(req: ProcessRequest):
 
     # Crop/zoom/pan happens here, every call, against the cached full image
     # -- never against the image model.
-    face_w, face_h, face_outline = config.face_geometry(req.relief_ring, req.face_tilt_deg)
+    face_w, face_h, face_outline = config.face_geometry(req.relief_ring, req.face_tilt_deg, req.ridge_shift_mm)
     hm_w, hm_h = int(round(face_w * config.PX_PER_MM)), int(round(face_h * config.PX_PER_MM))
     rgb = cover_fit_resize(
         full_rgb,
@@ -287,6 +290,7 @@ def process(req: ProcessRequest):
             "face_height_mm": face_h,
             "relief_ring": req.relief_ring or config.DEFAULT_RELIEF_RING,
             "face_tilt_deg": req.face_tilt_deg,
+            "ridge_shift_mm": req.ridge_shift_mm,
             "crop_zoom": req.crop_zoom,
             "crop_offset_x": req.crop_offset_x,
             "crop_offset_y": req.crop_offset_y,
