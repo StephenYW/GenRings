@@ -800,7 +800,8 @@ function boxBlur(src, w, h, r) {
  *    band doesn't move.
  *
  * 4. On a "recess" ring (the design fills the floor inside a ridge) the floor
- *    moves straight up/down instead, and the ridge's inner wall stretches so
+ *    moves straight up/down instead, lifted so the design's highest point is
+ *    level with the top of the ridge's inner wall, and the wall stretches so
  *    its foot follows the floor edge below it and its top stays at the ridge.
  *
  * UV u runs along +X and v along +Z with image row 0 at -Z. The area's
@@ -811,6 +812,9 @@ function displaceFace() {
   // recess rings move the floor straight up/down, so its edge stays directly
   // under the ridge's wall, which then follows it (below)
   const vertical = RINGS.relief.mode === "recess";
+  // ...and the design's highest point always sits level with the top of the
+  // ridge's inner wall, at any exaggeration (which only deepens what's below it)
+  const recessLift = vertical ? RINGS.relief.wall_top_y_mm - RINGS.relief.floor_y_mm : 0;
   const { inArea, edgeIdx, edgeDist, uv, rim, entry } = area;
   const src = state.previewCanvas;
   const w = src.width, h = src.height;
@@ -858,7 +862,7 @@ function displaceFace() {
         height = edgeH[r] + (height - edgeH[r]) * t;
       }
       shade = 1 - PATINA.darkness * smoothstep(cavity * PATINA.strength) * t;
-      d = displaceMm(height);
+      d = vertical ? recessLift + reliefMax * (height - top) * exag : displaceMm(height);
     } else if (r >= 0) {
       // 3. band: the cove meets the design's (displaced) edge
       d = displaceMm(edgeH[r]) * coveProfile(dist / blendMm);

@@ -108,11 +108,13 @@ heightmap at the new size.
 the faces connected to the centre of the top that tilt less than `RECESS_MAX_TILT_DEG`
 (60°), which takes in the flat floor and the small fillet where it meets the ridge's
 vertical inner wall, so it uses all the space inside the ridge (11.94mm x 11.97mm). The
-floor is raised half way up the ridge's inner wall (`RECESS_FLOOR_RAISE` = 0.5, 0.45mm of
-the 0.9mm wall) for a shallower recess than the source model's, the wall shortening to
-match. The floor and the ridge's inner wall are refined twice and come first in the GLB. The viewer
+floor and the ridge's inner wall are refined twice and come first in the GLB. The viewer
 moves the floor straight up/down by the heightmap (top-down UVs over its box), so its
-edge stays directly under the wall. Each wall vertex carries `_wall` = (the floor-edge
+edge stays directly under the wall, and lifts the design so its **highest point is
+always level with the top of the ridge's inner wall** (`wall_top_y_mm` − `floor_y_mm`
+in `relief.json`, 0.96mm): each point sits at wall top − (design top − h) x relief
+scale x exaggeration. So at any exaggeration the peaks stay flush with the ridge and
+only what's below them deepens. Each wall vertex carries `_wall` = (the floor-edge
 vertex below it, how far up the wall it is), and the viewer stretches the wall so its
 foot follows that floor edge and its top stays at the ridge: when the design sinks the
 floor (e.g. dark edges with the preview exaggeration up), the wall reaches down to meet

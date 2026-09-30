@@ -18,9 +18,9 @@ of finding the design area:
   connected to the centre of the top that tilt less than RECESS_MAX_TILT_DEG,
   which takes in the floor and the small fillet where it meets the ridge's
   vertical inner wall, so the design fills all the space inside the ridge.
-  The floor is raised RECESS_FLOOR_RAISE of the way up the ridge's inner
-  wall (a shallower recess than the source model's), the wall shortening to
-  match. The floor and that wall are refined REFINE_LEVELS times; the
+  The viewer lifts the design so its highest point is always level with the
+  top of that wall (relief.json's floor_y_mm / wall_top_y_mm). The floor and
+  that wall are refined REFINE_LEVELS times; the
   floor's vertices and faces come first in the GLB, then the wall's. The
   wall's vertices carry `_WALL` = (index of the floor-edge vertex below them,
   how far up the wall they are, 0..1), so the viewer can stretch the wall
@@ -72,7 +72,6 @@ SHAPES = [  # (folder, base shape label, ridged)
 # design rings: (shape folder, size) -> how its design area is found
 RELIEF_RINGS = {("Square", "S"): "tilt", ("SquareRidged", "S"): "recess"}
 DEFAULT_RING = ("Square", "S")
-RECESS_FLOOR_RAISE = 0.5  # recess: raise the floor this fraction of the way up the ridge's inner wall
 RECESS_MAX_TILT_DEG = 60  # recess: the floor + its fillet, up to where the ridge's inner wall turns vertical
 REFINE_LEVELS = 2       # 0.17 mm source edges -> ~0.04 mm on the face
 ZBUFFER_MM = 0.02       # top-down visibility raster resolution
@@ -444,12 +443,6 @@ def build_recess(v: np.ndarray, f: np.ndarray):
     wall_attr[n_region:n_region + n_wall, 0] = edge_v[j]
     wall_attr[n_region:n_region + n_wall, 1] = t
 
-    # raise the floor part-way up the ridge's inner wall (a shallower recess);
-    # the wall shortens to match, its top at the ridge staying put
-    lift = RECESS_FLOOR_RAISE * float(np.mean(top_y - base_y))
-    v = v.copy()
-    v[:n_region, 1] += lift
-    v[n_region:n_region + n_wall, 1] += lift * (1 - t)
 
     rv = v[:n_region]
     x0, x1, z0, z1 = rv[:, 0].min(), rv[:, 0].max(), rv[:, 2].min(), rv[:, 2].max()
@@ -462,7 +455,7 @@ def build_recess(v: np.ndarray, f: np.ndarray):
     c = cv2.approxPolyDP(max(contours, key=cv2.contourArea), 1.0, True).reshape(-1, 2)
     outline = [[round(float((p[0] - 1) * ZBUFFER_MM - w / 2), 3), round(float((p[1] - 1) * ZBUFFER_MM - h / 2), 3)] for p in c]
     print(f"  refined: {len(f)} faces ({n_faces} floor, {n_wall_faces} wall), {len(v)} vertices; "
-          f"floor {w:.2f} x {h:.2f} mm; wall {top_y - base_y.mean():.2f} mm tall, floor raised {lift:.2f} mm")
+          f"floor {w:.2f} x {h:.2f} mm; wall {top_y - base_y.mean():.2f} mm tall")
     info = {
         "mode": "recess",
         "face_width_mm": round(float(w), 3),
@@ -472,7 +465,9 @@ def build_recess(v: np.ndarray, f: np.ndarray):
         "region_vertex_count": n_region,
         "region_face_count": n_faces,
         "wall_vertex_count": n_wall,
-        "floor_raised_mm": round(lift, 3),
+        # the viewer lifts the design so its highest point sits at the wall top
+        "floor_y_mm": round(float(np.median(v[:n_region, 1])), 4),
+        "wall_top_y_mm": round(float(top_y), 4),
         "max_tilt_deg": RECESS_MAX_TILT_DEG,
         "uv": "top-down: u = (x - x0) / face_width_mm ; v = (z - z0) / face_height_mm ; image row 0 at -Z",
     }
