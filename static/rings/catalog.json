@@ -1,4 +1,5 @@
 {
+ "version": 1790806726,
  "shapes": [
   {
    "id": "Circle",
@@ -1971,10 +1972,16 @@
    ]
   }
  ],
- "relief": {
-  "shape": "Square",
-  "size": "S"
- },
+ "relief": [
+  {
+   "shape": "Square",
+   "size": "S"
+  },
+  {
+   "shape": "SquareRidged",
+   "size": "S"
+  }
+ ],
  "default": {
   "shape": "Square",
   "size": "S"

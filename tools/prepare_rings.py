@@ -5,14 +5,24 @@ loads.
 
   static/rings/<Shape>/<Size>.glb   one mesh per ring, viewer axes
   static/rings/catalog.json         every shape/size, for the ring menu
-  static/rings/relief.json          the relief-capable ring's face region
+  static/rings/relief.json          the design rings' design areas (per ring)
 
 Source axes: finger-hole axis = X, head up = +Z, hole centred on the origin.
 Viewer axes: up = +Y, hole axis = Z, so (x, y, z)_viewer = (y, z, x)_source
 (a cyclic swap, so handedness is kept).
 
-The relief (heightmap) goes on one ring, RELIEF_SHAPE / RELIEF_SIZE, on its
-flat top: the triangles visible from straight above (a top-down z-buffer) that
+Designs (heightmaps) go on the rings in RELIEF_RINGS, each with its own way
+of finding the design area:
+
+- "recess" (S SquareRidged): the recessed floor inside the ridge -- the faces
+  connected to the centre of the top that tilt less than RECESS_MAX_TILT_DEG,
+  which takes in the floor and the small fillet where it meets the ridge's
+  vertical inner wall, so the design fills all the space inside the ridge.
+  That floor is refined REFINE_LEVELS times; its vertices and faces come
+  first in the GLB. relief.json gives its box seen from above and outline.
+- "tilt" (S Square), below.
+
+The "tilt" design area is the ring's flat top: the triangles visible from straight above (a top-down z-buffer) that
 tilt less than an angle the viewer sets live (a slider, default
 DEFAULT_TILT_DEG, up to TILT_MAX_DEG). So the viewer can recompute that area
 without a rebuild, the script prepares everything any angle could need:
@@ -35,6 +45,7 @@ from __future__ import annotations
 import argparse
 import json
 import struct
+import time
 from pathlib import Path
 
 import cv2
@@ -52,7 +63,10 @@ SHAPES = [  # (folder, base shape label, ridged)
     ("Rectangle", "Rectangle", False), ("RectangleRidged", "Rectangle", True),
     ("ThinRectangle", "Thin rectangle", False), ("ThinRectangleRidged", "Thin rectangle", True),
 ]
-RELIEF_SHAPE, RELIEF_SIZE = "Square", "S"
+# design rings: (shape folder, size) -> how its design area is found
+RELIEF_RINGS = {("Square", "S"): "tilt", ("SquareRidged", "S"): "recess"}
+DEFAULT_RING = ("Square", "S")
+RECESS_MAX_TILT_DEG = 60  # recess: the floor + its fillet, up to where the ridge's inner wall turns vertical
 REFINE_LEVELS = 2       # 0.17 mm source edges -> ~0.04 mm on the face
 ZBUFFER_MM = 0.02       # top-down visibility raster resolution
 DEFAULT_TILT_DEG = 8    # the design area: the top that tilts less than this (the viewer's slider starts here)
@@ -340,6 +354,7 @@ def build_relief(v: np.ndarray, f: np.ndarray):
 
     default = min(table, key=lambda e: abs(e["deg"] - DEFAULT_TILT_DEG))
     info = {
+        "mode": "tilt",
         "default_tilt_deg": default["deg"],
         "tilt_step_deg": TILT_STEP_DEG,
         # the default design area, for the backend's defaults
@@ -357,15 +372,81 @@ def build_relief(v: np.ndarray, f: np.ndarray):
     return v, f, info
 
 
+def build_recess(v: np.ndarray, f: np.ndarray):
+    """The recessed floor inside a ridged ring's ridge: refine it, order it
+    first, and measure its box and outline from above. Returns (verts, faces, info)."""
+    fn = np.cross(v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]])
+    fn /= np.maximum(np.linalg.norm(fn, axis=1), 1e-12)[:, None]
+    tilt = np.degrees(np.arccos(np.clip(fn[:, 1], -1, 1)))
+    cen = v[f].mean(1)
+    # start from the highest upward face over the ring's axis: the floor
+    # (the finger hole's bottom also faces up there, but lower down)
+    near = np.where((np.hypot(cen[:, 0], cen[:, 2]) < 0.5) & (fn[:, 1] > 0.9))[0]
+    start = int(near[np.argmax(cen[near, 1])])
+    ok = tilt < RECESS_MAX_TILT_DEG
+    nbrs = [[] for _ in range(len(f))]
+    for a, b in face_adjacency(f):
+        nbrs[a].append(b)
+        nbrs[b].append(a)
+    floor = np.zeros(len(f), bool)
+    floor[start] = True
+    stack = [start]
+    while stack:
+        for nb in nbrs[stack.pop()]:
+            if ok[nb] and not floor[nb]:
+                floor[nb] = True
+                stack.append(nb)
+    print(f"  recessed floor: {floor.sum()} faces (of {len(f)})")
+
+    v, f, floor = refine(v, f, floor, REFINE_LEVELS)
+    f = np.r_[f[floor], f[~floor]]
+    n_faces = int(floor.sum())
+    in_region = np.zeros(len(v), bool)
+    in_region[np.unique(f[:n_faces])] = True
+    order = np.r_[np.where(in_region)[0], np.where(~in_region)[0]]
+    remap = np.empty(len(v), np.int64)
+    remap[order] = np.arange(len(v))
+    v, f = v[order], remap[f]
+    n_region = int(in_region.sum())
+
+    rv = v[:n_region]
+    x0, x1, z0, z1 = rv[:, 0].min(), rv[:, 0].max(), rv[:, 2].min(), rv[:, 2].max()
+    w, h = x1 - x0, z1 - z0
+    mask = np.zeros((int(h / ZBUFFER_MM) + 3, int(w / ZBUFFER_MM) + 3), np.uint8)
+    px = np.round(np.c_[(v[:, 0] - x0) / ZBUFFER_MM + 1, (v[:, 2] - z0) / ZBUFFER_MM + 1]).astype(np.int32)
+    for tri in f[:n_faces]:
+        cv2.fillConvexPoly(mask, px[tri], 1)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    c = cv2.approxPolyDP(max(contours, key=cv2.contourArea), 1.0, True).reshape(-1, 2)
+    outline = [[round(float((p[0] - 1) * ZBUFFER_MM - w / 2), 3), round(float((p[1] - 1) * ZBUFFER_MM - h / 2), 3)] for p in c]
+    print(f"  refined: {len(f)} faces ({n_faces} floor), {len(v)} vertices; floor {w:.2f} x {h:.2f} mm")
+    info = {
+        "mode": "recess",
+        "face_width_mm": round(float(w), 3),
+        "face_height_mm": round(float(h), 3),
+        "x0": round(float(x0), 4), "z0": round(float(z0), 4),
+        "outline_xz_mm": outline,
+        "region_vertex_count": n_region,
+        "region_face_count": n_faces,
+        "max_tilt_deg": RECESS_MAX_TILT_DEG,
+        "uv": "top-down: u = (x - x0) / face_width_mm ; v = (z - z0) / face_height_mm ; image row 0 at -Z",
+    }
+    return v, f, info
+
+
 # --- main ------------------------------------------------------------------------
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--relief", action="store_true", help="only rebuild the relief ring and relief.json")
+    ap.add_argument("--relief", action="store_true", help="only rebuild the design rings and relief.json")
     args = ap.parse_args()
 
-    catalog = {"shapes": [], "relief": {"shape": RELIEF_SHAPE, "size": RELIEF_SIZE},
-               "default": {"shape": RELIEF_SHAPE, "size": RELIEF_SIZE}}
+    # A build stamp: the viewer adds it to the GLB URLs so a browser never
+    # pairs a cached model from an older build with this build's data.
+    version = int(time.time())
+    catalog = {"version": version, "shapes": [], "relief": [{"shape": sh, "size": sz} for sh, sz in RELIEF_RINGS],
+               "default": {"shape": DEFAULT_RING[0], "size": DEFAULT_RING[1]}}
+    reliefs = {}
     for folder, base, ridged in SHAPES:
         entry = {"id": folder, "base": base, "ridged": ridged, "sizes": []}
         for size in SIZES:
@@ -379,18 +460,20 @@ def main() -> None:
                     continue
                 src = found[0]
             rel = f"{folder}/{size}.glb"
-            is_relief = folder == RELIEF_SHAPE and size == RELIEF_SIZE
+            mode = RELIEF_RINGS.get((folder, size))
+            is_relief = mode is not None
             if args.relief and not is_relief:
                 continue
             v, f = read_stl(src)
             v = to_viewer_axes(v)
             dia = inner_diameter(v, f)
             if is_relief:
-                print(f"{folder} {size}: building relief face region")
-                v, f, info = build_relief(v, f)
+                print(f"{folder} {size}: building the design area ({mode})")
+                v, f, info = build_relief(v, f) if mode == "tilt" else build_recess(v, f)
                 write_glb(OUT_DIR / rel, f"{size}_{folder}", v, f)
-                info.update({"shape": folder, "size": size, "file": rel, "inner_diameter_mm": round(dia, 3)})
-                (OUT_DIR / "relief.json").write_text(json.dumps(info))
+                info.update({"shape": folder, "size": size, "file": rel, "inner_diameter_mm": round(dia, 3),
+                             "vertex_count": len(v)})
+                reliefs[f"{folder}/{size}"] = info
             else:
                 write_glb(OUT_DIR / rel, f"{size}_{folder}", v, f)
             ext = v.max(0) - v.min(0)
@@ -398,6 +481,7 @@ def main() -> None:
                                    "extent_mm": [round(float(x), 2) for x in ext]})
             print(f"{folder:20s} {size}: inner dia {dia:5.2f} mm -> {rel}")
         catalog["shapes"].append(entry)
+    (OUT_DIR / "relief.json").write_text(json.dumps({"version": version, "default": "/".join(DEFAULT_RING), "rings": reliefs}))
     if not args.relief:
         (OUT_DIR / "catalog.json").write_text(json.dumps(catalog, indent=1))
         print(f"catalog: {sum(len(s['sizes']) for s in catalog['shapes'])} rings")

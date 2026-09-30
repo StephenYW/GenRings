@@ -10,39 +10,44 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Ring face geometry ---------------------------------------------------
-# The relief goes on one ring from the library (S Square for now) and covers
-# its flat top, ending where the top starts to round over. That region's
-# bounding box (the heightmap's size)
-# and outline come from static/rings/relief.json, written by
-# tools/prepare_rings.py, so the backend and 3D viewer can't drift apart. The
-# fallback is only used if that file hasn't been generated.
+# Designs go on a few rings from the library ("design rings"), each over its
+# own design area: on S Square, the top tilting less than an angle the viewer
+# sets ("tilt"); on S SquareRidged, the recessed floor inside the ridge
+# ("recess"). Each area's size (the heightmap's size) and outline come from
+# static/rings/relief.json, written by tools/prepare_rings.py, so the backend
+# and 3D viewer can't drift apart. The fallback is only used if that file
+# hasn't been generated.
 import json
 
 _FACE_INFO_PATH = Path(__file__).resolve().parent.parent / "static" / "rings" / "relief.json"
 try:
-    _face_info = json.loads(_FACE_INFO_PATH.read_text())
+    _relief = json.loads(_FACE_INFO_PATH.read_text())
 except (OSError, ValueError):
-    _face_info = {}
+    _relief = {}
+RELIEF_RINGS = _relief.get("rings", {})           # "Shape/Size" -> that ring's design-area info
+DEFAULT_RELIEF_RING = _relief.get("default")
+_face_info = RELIEF_RINGS.get(DEFAULT_RELIEF_RING, {})
 
+# The default design area (the default ring's, at its default angle)
 FACE_WIDTH_MM = float(_face_info.get("face_width_mm", 14.0))
 FACE_HEIGHT_MM = float(_face_info.get("face_height_mm", 12.0))
 # Outline of the face in mm, centred on the bounding box (x, z); None if unknown.
 FACE_OUTLINE_MM = _face_info.get("outline_xz_mm")
 
-# The design area's edge is an angle the viewer's slider sets: the top that
-# tilts less than it. relief.json tabulates the area's size and outline per
-# angle; requests pass the angle and get that size (face_geometry).
-FACE_TILT_TABLE = _face_info.get("tilt_table", [])
-DEFAULT_FACE_TILT_DEG = _face_info.get("default_tilt_deg")
 
-
-def face_geometry(tilt_deg=None):
-    """(width_mm, height_mm, outline) of the design area for a tilt angle
-    (nearest tabulated step); the defaults when no angle or table is given."""
-    if tilt_deg is None or not FACE_TILT_TABLE:
+def face_geometry(ring=None, tilt_deg=None):
+    """(width_mm, height_mm, outline) of a design ring's design area. For a
+    "tilt" ring, at the nearest tabulated angle to tilt_deg (its default if
+    None). Unknown rings get the defaults."""
+    info = RELIEF_RINGS.get(ring or DEFAULT_RELIEF_RING)
+    if not info:
         return FACE_WIDTH_MM, FACE_HEIGHT_MM, FACE_OUTLINE_MM
-    e = min(FACE_TILT_TABLE, key=lambda t: abs(t["deg"] - tilt_deg))
-    return e["width_mm"], e["height_mm"], e["outline_xz_mm"]
+    table = info.get("tilt_table")
+    if table:
+        deg = info.get("default_tilt_deg") if tilt_deg is None else tilt_deg
+        e = min(table, key=lambda t: abs(t["deg"] - deg))
+        return e["width_mm"], e["height_mm"], e["outline_xz_mm"]
+    return info["face_width_mm"], info["face_height_mm"], info.get("outline_xz_mm")
 
 # --- Heightmap resolution ---------------------------------------------------
 PX_PER_MM = 50

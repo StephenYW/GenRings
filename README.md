@@ -12,8 +12,10 @@ Each click of "Generate" makes exactly **one** image (one billed API call) and a
 the gallery — there's no hidden batching. Click it again to add another for comparison.
 
 The 3D preview shows real signet ring models from a library of 10 shapes in UK sizes H–Z
-(pick one from the menu), and applies the design to one of them, **S Square**, over its
-flat top — about 13.1mm x 13.4mm at the default 8°, adjustable with a slider, read from `static/rings/relief.json`.
+(pick one from the menu), and applies the design to two of them: **S Square**, over its
+flat top (about 13.1mm x 13.4mm at the default 8°, adjustable with a slider), and **S
+Square (ridged)**, over the recessed floor inside its ridge (11.9mm x 12.0mm). Sizes come
+from `static/rings/relief.json`.
 The minimum-feature rules exist because fine detail doesn't survive manufacturing at that
 size. Once you pick a candidate, drag/zoom a crop box over the full
 source image to choose exactly what lands on the face — see "Crop, pan & zoom" below.
@@ -79,14 +81,38 @@ converts them for the viewer:
   (up = +Y, finger hole along Z). Not committed (~570MB); rerun the script to rebuild.
 - `static/rings/catalog.json` — every shape and size with its measured inner diameter,
   which the viewer's ring menu (Shape / Ridged / Size) is built from.
-- `static/rings/relief.json` — the relief ring's face region (see below).
+- `static/rings/relief.json` — the design rings' design areas, one entry per ring
+  (`rings`, keyed "Shape/Size", each with a `mode`), plus the `default` ring.
 
 Every ring gets the same polished silver (see "Metal look").
 
+Each run of the script stamps a build `version` into `catalog.json` and `relief.json`,
+and the viewer requests models as `<Size>.glb?v=<version>` (and the JSON uncached), so
+a browser can't pair a cached model from an older build with newer design-area data.
+If a design ring's model still doesn't match its data (vertex count), the viewer shows
+an error rather than applying the design to the wrong vertices.
+
+Until a design is picked, each design ring shows a placeholder fitted to its design area:
+concentric copies of the area's outline, the outermost filling it to the edge (on the
+ridged ring, right up to the ridge walls).
+
 ### Where the design goes
 
-The heightmap is applied to one ring, `RELIEF_SHAPE` / `RELIEF_SIZE` in the script (S
-Square), over its flat top: the triangles visible from straight above (a top-down
+Designs go on the rings listed in `RELIEF_RINGS` in the script, each with its own way of
+finding the design area. Each `/api/process` request says which ring the heightmap is
+for (`relief_ring`), and the backend sizes it to that ring's area
+(`config.face_geometry`). Switching between design rings in the viewer re-makes the
+heightmap at the new size.
+
+**S Square (ridged) — "recess".** The design fills the recessed floor inside the ridge:
+the faces connected to the centre of the top that tilt less than `RECESS_MAX_TILT_DEG`
+(60°), which takes in the flat floor and the small fillet where it meets the ridge's
+vertical inner wall, so it uses all the space inside the ridge (11.94mm x 11.97mm). The
+floor is refined twice and comes first in its GLB; the viewer pushes it up along its
+normals by the heightmap, with top-down UVs over its box. There is no band transition:
+the ridge is left as it is.
+
+**S Square — "tilt".** The design goes on its flat top: the triangles visible from straight above (a top-down
 z-buffer) that tilt less than an angle you set live with the **Design area** slider under
 the ring menu (0.5°–30°, default `DEFAULT_TILT_DEG` = 8°). Lower keeps the design on the
 flattest part of the top; higher spreads it onto the rounded edge. The area's footprint
@@ -117,17 +143,22 @@ area.
 So the design doesn't start abruptly at the area's edge, the band around it curves up to
 meet it. The viewer (`displaceFace` in `static/main.js`) then, on every update:
 
-1. reads the design's height at every point on the area's edge and smooths it along
-   the edge (`EDGE_SMOOTH_MM`), so the band follows the design's broad shape;
+1. reads the design's height at every point on the area's edge, smoothed only slightly
+   along the edge (`EDGE_SMOOTH_MM` = 0.1mm, just to drop pixel noise), so the band
+   follows the design's detail;
 2. pushes each design-area vertex out along its normal (straight up) by the heightmap,
    easing into that smoothed edge height over the last `INNER_MM` (0.3mm), so the two
    meet exactly;
-3. pushes each band vertex out along its own normal by the edge height at its nearest
-   edge point, times a smooth falloff: full at the edge, zero `BLEND_MM` down, with no
-   kink at either end. The band rises into the design and blends back into the untouched
-   ring lower down.
+3. moves each band vertex along its own normal by the edge height at its nearest edge
+   point times `coveProfile(t)`, with t = distance from the edge / `BLEND_MM`:
+   `(1 - t)^p - cut * 6.75 * t * (1 - t)^2`. That is a concave cove: going up from the
+   band, the surface dips into a hollow carved into the band (deepest, `COVE.cut` x the
+   edge height, a third of the way down) and then sweeps up to meet the design's edge,
+   more sharply the larger `p` — the **Edge cove steepness** slider (1–8, default 3).
+   Everything is 0 with zero slope `BLEND_MM` down, so it blends into the untouched ring.
 
-Where the design is dark at the edge, the band stays as it is. Other rings show without a design, and the menu says so.
+Because the cove scales with the design's height at the edge, there is no cove where
+the design has no height there: the band stays exactly as it is. Other rings show without a design, and the menu says so.
 The STL export is still the plain rectangular relief slab.
 
 ## How it works
@@ -148,7 +179,11 @@ The STL export is still the plain rectangular relief slab.
 4. The frontend (`static/main.js`, Three.js, no build step) applies the 8-bit preview
    to the relief ring (see "Where the design goes") and recomputes normals — polished
    with `MeshStandardMaterial` (metalness 1, roughness 0.05) in a photo-studio HDRI
-   (see "Metal look" below). The exaggeration slider only scales the *displayed* mesh;
+   (see "Metal look" below). The exaggeration slider only changes the *displayed* mesh, and grows the
+   design downwards: its highest point stays at its true height and everything below
+   sinks `exaggeration` times deeper (height = top + (h − top) × exaggeration), so it
+   deepens into the ring rather than rising out of it (on the ridged ring it stays below
+   the ridge);
    exports always use the true (max 0.4mm) relief height.
 
 ### Crop, pan & zoom
@@ -276,7 +311,8 @@ processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `mod
   content. That's expected; it exists purely so the app/tests work with zero setup.
 - The STL export downsamples the heightmap grid for a manageable file size/face count;
   it's a preview-quality mesh, not a full-resolution manufacturing file.
-- Designs are applied to one ring (S Square) so far; the other 189 rings show without one.
+- Designs are applied to two rings (S Square and S Square ridged) so far; the other 188
+  rings show without one.
 - Only the face relief is ever exported (as a rectangular slab STL), not the ring it sits on.
 
 ## Metal look

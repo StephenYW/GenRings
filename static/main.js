@@ -36,14 +36,22 @@ const state = {
  */
 const RINGS = {
   catalog: null,
-  relief: null,        // relief.json
+  reliefs: {},         // relief.json's rings: "Shape/Size" -> that design ring's design-area info
+  relief: null,        // the info of the design ring the design currently goes on
+  reliefKey: null,     // ...and its "Shape/Size" (sent with each heightmap request)
+  tiltInfo: null,      // the "tilt" design ring's info (drives the Design area slider)
   current: null,       // { shape, size } on show
   loadToken: 0,        // ignores a slow load that a newer selection has overtaken
 };
 
 // How the band around the flat top meets the design (relief ring only).
 const BAND_MAX_DOWN_NORMAL = -0.5; // band vertices facing further down than this (the finger hole) never move
-const EDGE_SMOOTH_MM = 0.4; // Gaussian sigma of the design's height along the edge: the band follows its broad shape
+const EDGE_SMOOTH_MM = 0.1; // Gaussian sigma of the design's height along the edge: just enough to drop pixel noise
+// The band's cove below the design's edge (see coveProfile). Its steepness is a slider.
+const COVE = {
+  steepness: 3,  // how sharply the cove sweeps up at the edge: 1 = gentle, higher = closer to vertical
+  cut: 1.0,      // how deep the hollow is carved into the band, x the design's edge height
+};
 
 function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
@@ -307,19 +315,24 @@ function smoothstep(t) {
 /** Load the catalog and relief info, build the ring menu, and show the default ring. */
 async function loadRingLibrary() {
   const [catalog, relief] = await Promise.all([
-    fetch("/rings/catalog.json").then((r) => r.json()),
-    fetch("/rings/relief.json").then((r) => r.json()).catch(() => null),
+    fetch("/rings/catalog.json", { cache: "no-store" }).then((r) => r.json()),
+    fetch("/rings/relief.json", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
   ]);
   RINGS.catalog = catalog;
-  RINGS.relief = relief;
-  if (relief && relief.tilt_table) {
-    const t = relief.tilt_table;
+  RINGS.reliefs = (relief && relief.rings) || {};
+  RINGS.reliefVersion = relief && relief.version;
+  RINGS.reliefKey = relief && relief.default;
+  RINGS.relief = RINGS.reliefs[RINGS.reliefKey] || null;
+  RINGS.tiltInfo = Object.values(RINGS.reliefs).find((r) => r.mode === "tilt") || null;
+  const tiltInfo = RINGS.tiltInfo;
+  if (tiltInfo) {
+    const t = tiltInfo.tilt_table;
     const slider = document.getElementById("designTilt");
     slider.min = t[0].deg;
     slider.max = t[t.length - 1].deg;
-    slider.step = relief.tilt_step_deg;
-    slider.value = relief.default_tilt_deg;
-    setDesignTilt(relief.default_tilt_deg, false);
+    slider.step = tiltInfo.tilt_step_deg;
+    slider.value = tiltInfo.default_tilt_deg;
+    setDesignTilt(tiltInfo.default_tilt_deg, false);
   }
   buildRingMenu();
   const d = catalog.default;
@@ -331,7 +344,7 @@ function shapeEntry(id) {
 }
 
 function isReliefRing(shape, size) {
-  return RINGS.relief && RINGS.relief.shape === shape && RINGS.relief.size === size;
+  return Boolean(RINGS.reliefs[`${shape}/${size}`]);
 }
 
 /**
@@ -348,7 +361,10 @@ async function selectRing(shape, size) {
   setRingBadge(`Loading ${label}...`);
   let gltf;
   try {
-    gltf = await new GLTFLoader().loadAsync(`/rings/${item.file}`);
+    // versioned URL: a cached model from an older build must never be paired
+    // with this build's design-area data (design rings are rebuilt on their own)
+    const version = isReliefRing(shape, size) ? RINGS.reliefVersion : RINGS.catalog.version;
+    gltf = await new GLTFLoader().loadAsync(`/rings/${item.file}?v=${version || ""}`);
   } catch (err) {
     setRingBadge(`Failed to load ${label}: ${err.message || err}`, true);
     throw err;
@@ -362,16 +378,33 @@ async function selectRing(shape, size) {
 
   const relief = isReliefRing(shape, size);
   if (relief) {
+    const key = `${shape}/${size}`, info = RINGS.reliefs[key];
+    if (info.vertex_count && geo.attributes.position.count !== info.vertex_count) {
+      const msg = `${label}: model and design data are from different builds -- rerun tools/prepare_rings.py and reload`;
+      setRingBadge(msg, true);
+      throw new Error(msg);
+    }
+    const switched = key !== RINGS.reliefKey;
+    RINGS.relief = info;
+    RINGS.reliefKey = key;
     const count = geo.attributes.position.count;
     geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3));
     mesh.material = getFaceMaterial();
     state.reliefMesh = mesh;
-    state.reliefBase = prepareReliefZone(
-      Float32Array.from(geo.attributes.position.array),
-      Float32Array.from(geo.attributes.normal.array),
-      geo.index.array,
-    );
-    state.reliefBase.area = computeDesignArea(state.reliefBase, state.faceTiltDeg);
+    const pos = Float32Array.from(geo.attributes.position.array);
+    const nrm = Float32Array.from(geo.attributes.normal.array);
+    if (info.mode === "tilt") {
+      state.reliefBase = prepareReliefZone(pos, nrm, geo.index.array);
+      state.reliefBase.area = computeDesignArea(state.reliefBase, state.faceTiltDeg);
+      const e = tiltEntry(state.faceTiltDeg);
+      setFaceSize(e.width_mm, e.height_mm, e.outline_xz_mm);
+    } else {
+      state.reliefBase = { pos, nrm, n: info.region_vertex_count };
+      state.reliefBase.area = recessArea(state.reliefBase, info);
+      setFaceSize(info.face_width_mm, info.face_height_mm, info.outline_xz_mm);
+    }
+    // the heightmap is sized per design area: re-make it for this ring
+    if (switched) debouncedRefresh();
   } else {
     mesh.material = getSilverMaterial();
     state.reliefMesh = null;
@@ -389,6 +422,37 @@ async function selectRing(shape, size) {
   if (relief) updateMeshHeights();
   syncRingMenu();
   setRingBadge(label);
+}
+
+/** The design area's size: the heightmap's and the crop box's shape follow it. */
+function setFaceSize(widthMm, heightMm, outline) {
+  state.cfg.face_width_mm = widthMm;
+  state.cfg.face_height_mm = heightMm;
+  renderCropBox();
+  // until a design is picked, show the placeholder, fitted to this area
+  if (!state.selectedCandidateId) state.previewCanvas = makeTestHeightmapCanvas(widthMm, heightMm, outline);
+}
+
+/**
+ * The design area of a "recess" ring (the recessed floor inside a ridge): its
+ * vertices are the first region_vertex_count; the design fills it up to the
+ * ridge with no band transition, so no vertex has an edge link.
+ */
+function recessArea(base, info) {
+  const n = base.n, pos = base.pos;
+  const uv = new Float32Array(2 * n);
+  for (let i = 0; i < n; i++) {
+    uv[2 * i] = (pos[3 * i] - info.x0) / info.face_width_mm;
+    uv[2 * i + 1] = (pos[3 * i + 2] - info.z0) / info.face_height_mm;
+  }
+  return {
+    entry: { width_mm: info.face_width_mm, height_mm: info.face_height_mm },
+    inArea: new Uint8Array(n).fill(1),
+    edgeIdx: new Int32Array(n).fill(-1),
+    edgeDist: new Float32Array(n),
+    uv,
+    rim: edgeLoop(pos, []),
+  };
 }
 
 /**
@@ -510,9 +574,9 @@ function computeDesignArea(base, deg) {
   return { deg: entry.deg, entry, inArea, edgeIdx, edgeDist, uv, rim: edgeLoop(pos, loop) };
 }
 
-/** The tabulated design area (relief.json tilt_table) nearest to an angle. */
+/** The tilt design ring's tabulated design area (tilt_table) nearest to an angle. */
 function tiltEntry(deg) {
-  return RINGS.relief.tilt_table.reduce((best, e) => (Math.abs(e.deg - deg) < Math.abs(best.deg - deg) ? e : best));
+  return RINGS.tiltInfo.tilt_table.reduce((best, e) => (Math.abs(e.deg - deg) < Math.abs(best.deg - deg) ? e : best));
 }
 
 /** Binary min-heap of (key, value) pairs, for the distance search. */
@@ -625,14 +689,19 @@ function syncRingMenu() {
     .join("");
   sizeSel.value = size;
   const note = document.getElementById("ringReliefNote");
-  const r = RINGS.relief;
-  if (r && !isReliefRing(shape, size)) {
+  const onRelief = isReliefRing(shape, size);
+  const names = Object.values(RINGS.reliefs).map((r) => {
+    const e = shapeEntry(r.shape);
+    return `${e.base}${e.ridged ? " (ridged)" : ""} · size ${r.size}`;
+  });
+  if (names.length && !onRelief) {
     note.hidden = false;
-    note.textContent = `Designs are shown on ${r.shape} · size ${r.size} only for now.`;
+    note.textContent = `Designs are shown on ${names.join(" and ")} only for now.`;
   } else {
     note.hidden = true;
   }
-  document.getElementById("designTiltGroup").hidden = !(r && r.tilt_table && isReliefRing(shape, size));
+  const info = RINGS.reliefs[`${shape}/${size}`];
+  document.getElementById("designTiltGroup").hidden = !(info && info.mode === "tilt");
 }
 
 /**
@@ -645,10 +714,10 @@ let tiltFrame = 0;
 function setDesignTilt(deg, reprocess) {
   state.faceTiltDeg = deg;
   const e = tiltEntry(deg);
-  state.cfg.face_width_mm = e.width_mm;
-  state.cfg.face_height_mm = e.height_mm;
   document.getElementById("designTiltVal").textContent = `${e.deg.toFixed(1)}° (${e.width_mm.toFixed(2)} × ${e.height_mm.toFixed(2)} mm)`;
-  renderCropBox();
+  const onTiltRing = RINGS.relief && RINGS.relief.mode === "tilt";
+  if (!onTiltRing) return; // the angle applies to the tilt ring's design area only
+  setFaceSize(e.width_mm, e.height_mm, e.outline_xz_mm);
   if (state.reliefBase && !tiltFrame) {
     tiltFrame = requestAnimationFrame(() => {
       tiltFrame = 0;
@@ -719,11 +788,11 @@ function boxBlur(src, w, h, r) {
  * 2. Area vertices are pushed out along their normal (straight up) by the
  *    heightmap at their top-down UV. Within inner_mm of the edge the design
  *    eases into that smoothed edge height, so the two meet exactly.
- * 3. Band vertices (rounded edge and upper shoulders) are pushed out along
- *    their own normal by the edge height at their nearest edge point, times a
- *    smooth falloff: full at the edge, zero at blend_mm down, with zero slope
- *    at both ends. So the band rises into the design without a step and
- *    blends back into the untouched ring lower down.
+ * 3. Band vertices (rounded edge and upper shoulders) move along their own
+ *    normal by the edge height at their nearest edge point times
+ *    coveProfile: a concave cove, carved into the band, that sweeps up to
+ *    meet the design's edge. Where the design has no height at the edge the
+ *    band doesn't move.
  *
  * UV u runs along +X and v along +Z with image row 0 at -Z. The area's
  * recesses get the oxidized patina (see PATINA).
@@ -734,12 +803,17 @@ function displaceFace() {
   const src = state.previewCanvas;
   const w = src.width, h = src.height;
   const { data } = src.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, w, h);
-  const scaleMm = state.cfg.relief_max_mm * state.exaggeration;
-  const blendMm = RINGS.relief.blend_mm, innerMm = RINGS.relief.inner_mm;
+  const reliefMax = state.cfg.relief_max_mm, exag = state.exaggeration;
+  const blendMm = RINGS.relief.blend_mm || 1, innerMm = RINGS.relief.inner_mm || 1; // (recess rings have no band)
 
   const raw = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) raw[i] = data[i * 4] / 255; // grayscale, R channel
+  let top = 0; // the design's highest point
+  for (let i = 0; i < w * h; i++) { raw[i] = data[i * 4] / 255; if (raw[i] > top) top = raw[i]; } // grayscale, R channel
   const blurred = boxBlur(raw, w, h, Math.max(1, Math.round((PATINA.radiusMm / entry.width_mm) * w)));
+  // The preview exaggeration grows the design downwards: its highest point
+  // stays at its true height and everything below it sinks `exag` times
+  // deeper (at 1x this is just the true height).
+  const displaceMm = (height) => reliefMax * (top + (height - top) * exag);
 
   // 1. design height along the edge, smoothed
   const nRim = rim.idx.length;
@@ -760,11 +834,11 @@ function displaceFace() {
   const col = geo.attributes.color;
   for (let i = 0; i < n; i++) {
     const r = edgeIdx[i], dist = edgeDist[i];
-    let height = 0, shade = 1;
+    let d = 0, shade = 1;
     if (inArea[i]) {
       // 2. design area
       const u = uv[2 * i], v = uv[2 * i + 1];
-      height = sampleBilinear(raw, w, h, u, v);
+      let height = sampleBilinear(raw, w, h, u, v);
       const cavity = Math.max(0, sampleBilinear(blurred, w, h, u, v) - height);
       let t = 1;
       if (r >= 0) {
@@ -772,11 +846,11 @@ function displaceFace() {
         height = edgeH[r] + (height - edgeH[r]) * t;
       }
       shade = 1 - PATINA.darkness * smoothstep(cavity * PATINA.strength) * t;
+      d = displaceMm(height);
     } else if (r >= 0) {
-      // 3. band
-      height = edgeH[r] * (1 - smoothstep(dist / blendMm));
+      // 3. band: the cove meets the design's (displaced) edge
+      d = displaceMm(edgeH[r]) * coveProfile(dist / blendMm);
     }
-    const d = height * scaleMm;
     pos.setXYZ(i, basePos[3 * i] + nrm[3 * i] * d, basePos[3 * i + 1] + nrm[3 * i + 1] * d, basePos[3 * i + 2] + nrm[3 * i + 2] * d);
     col.setXYZ(i, shade, shade, shade);
   }
@@ -784,6 +858,24 @@ function displaceFace() {
   col.needsUpdate = true;
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
+}
+
+/**
+ * The cove's shape down the band, as a multiple of the design's edge height,
+ * at t = distance from the edge / blend_mm (0 at the edge, 1 at the far side):
+ *
+ *   (1 - t)^p  -  cut * 6.75 * t * (1 - t)^2
+ *
+ * The first term rises to meet the design at the edge (1 at t = 0), more
+ * sharply the larger p (COVE.steepness); the second carves a hollow into the
+ * band, deepest (cut) at t = 1/3. Going up from the band the surface dips into
+ * that hollow and then sweeps up concavely to the edge. Both terms and their
+ * slopes are 0 at t = 1, so the cove blends smoothly into the untouched band.
+ */
+function coveProfile(t) {
+  if (t >= 1) return 0;
+  const s = 1 - t;
+  return Math.pow(s, COVE.steepness) - COVE.cut * 6.75 * t * s * s;
 }
 
 function updateMeshHeights() {
@@ -795,28 +887,36 @@ function updateMeshHeights() {
 // Hard-coded test heightmap (Milestone 1 — shown until a real design loads)
 // ---------------------------------------------------------------------------
 
-function makeTestHeightmapCanvas(cfg) {
-  const w = 460, h = Math.round((460 * cfg.face_height_mm) / cfg.face_width_mm);
+/**
+ * The placeholder design shown until one is picked, fitted to the design
+ * area: concentric copies of the area's outline (mm, centred on its box),
+ * brighter towards the middle, so the outermost fills the area right up to
+ * its edge (on a ridged ring, to the ridge's walls). Circles if no outline.
+ */
+function makeTestHeightmapCanvas(widthMm, heightMm, outline) {
+  const w = 460, h = Math.max(1, Math.round((460 * heightMm) / widthMm));
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, w, h);
-
-  // A few concentric rings + a star, purely to sanity-check the displacement
-  // pipeline (grid sampling, normals, exaggeration) before any AI/backend flow.
-  const cx = w / 2, cy = h / 2;
-  const rings = [1.0, 0.75, 0.5, 0.25];
-  const maxR = Math.min(w, h) * 0.38;
-  rings.forEach((f, i) => {
-    const v = Math.round(255 * ((i + 1) / rings.length));
+  const steps = [1.0, 0.78, 0.56, 0.34];
+  steps.forEach((f, i) => {
+    const v = Math.round(255 * ((i + 1) / steps.length));
     ctx.fillStyle = `rgb(${v},${v},${v})`;
     ctx.beginPath();
-    ctx.arc(cx, cy, maxR * f, 0, Math.PI * 2);
+    if (outline && outline.length > 2) {
+      outline.forEach(([x, z], k) => {
+        const px = (0.5 + (f * x) / widthMm) * w, py = (0.5 + (f * z) / heightMm) * h;
+        if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+    } else {
+      ctx.arc(w / 2, h / 2, (Math.min(w, h) / 2) * f, 0, Math.PI * 2);
+    }
     ctx.fill();
   });
-
   return canvas;
 }
 
@@ -1006,6 +1106,7 @@ function currentParams() {
     crop_zoom: state.crop.zoom,
     crop_offset_x: state.crop.offsetX,
     crop_offset_y: state.crop.offsetY,
+    relief_ring: RINGS.reliefKey,
     face_tilt_deg: state.faceTiltDeg,
   };
 }
@@ -1135,6 +1236,13 @@ function wireUI(cfg) {
   const tilt = document.getElementById("designTilt");
   tilt.addEventListener("input", () => setDesignTilt(parseFloat(tilt.value), false));
   tilt.addEventListener("change", () => setDesignTilt(parseFloat(tilt.value), true));
+  const cove = document.getElementById("coveSteepness");
+  cove.value = COVE.steepness;
+  wireSliderDisplay("coveSteepness");
+  cove.addEventListener("input", () => {
+    COVE.steepness = parseFloat(cove.value);
+    if (!tiltFrame) tiltFrame = requestAnimationFrame(() => { tiltFrame = 0; updateMeshHeights(); });
+  });
 
   wireSliderDisplay("exaggeration", "x");
   document.getElementById("exaggeration").addEventListener("input", (e) => {
@@ -1205,7 +1313,8 @@ async function main() {
 
   await initThree(cfg);
 
-  state.previewCanvas = makeTestHeightmapCanvas(cfg);
+  // (loading the default ring already made a placeholder fitted to its design area)
+  if (!state.previewCanvas) state.previewCanvas = makeTestHeightmapCanvas(cfg.face_width_mm, cfg.face_height_mm, cfg.face_outline_mm);
   updateMeshHeights();
 
   wireUI(cfg);

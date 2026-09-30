@@ -30,6 +30,9 @@
           <label for="designTilt">Design area: top tilting under <span id="designTiltVal"></span></label>
           <input type="range" id="designTilt" min="0.5" max="30" step="0.5" value="8" />
           <p class="hint">Lower keeps the design on the flattest part of the top; higher spreads it onto the rounded edge.</p>
+          <label for="coveSteepness">Edge cove steepness <span id="coveSteepnessVal"></span></label>
+          <input type="range" id="coveSteepness" min="1" max="8" step="0.5" value="3" />
+          <p class="hint">How sharply the band sweeps up into the design's edge.</p>
         </div>
       </section>
 
@@ -85,6 +88,7 @@
         <hr />
 
         <label>Preview exaggeration <span id="exaggerationVal"></span> <em>(display only)</em></label>
+        <p class="hint">Deepens the design downwards: its highest points stay at their true height.</p>
         <input type="range" id="exaggeration" min="1" max="6" step="0.1" value="1" />
 
         <div id="processStatus" class="status"></div>
@@ -107,6 +111,6 @@
     </main>
   </div>
 
-  <script type="module" src="/main.js?v=rings"></script>
+  <script type="module" src="/main.js?v=rings3"></script>
 </body>
 </html>
