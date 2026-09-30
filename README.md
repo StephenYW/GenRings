@@ -108,9 +108,13 @@ heightmap at the new size.
 the faces connected to the centre of the top that tilt less than `RECESS_MAX_TILT_DEG`
 (60°), which takes in the flat floor and the small fillet where it meets the ridge's
 vertical inner wall, so it uses all the space inside the ridge (11.94mm x 11.97mm). The
-floor is refined twice and comes first in its GLB; the viewer pushes it up along its
-normals by the heightmap, with top-down UVs over its box. There is no band transition:
-the ridge is left as it is.
+floor and the ridge's inner wall are refined twice and come first in the GLB. The viewer
+moves the floor straight up/down by the heightmap (top-down UVs over its box), so its
+edge stays directly under the wall. Each wall vertex carries `_wall` = (the floor-edge
+vertex below it, how far up the wall it is), and the viewer stretches the wall so its
+foot follows that floor edge and its top stays at the ridge: when the design sinks the
+floor (e.g. dark edges with the preview exaggeration up), the wall reaches down to meet
+it instead of floating. There is no band transition outside the ridge.
 
 **S Square — "tilt".** The design goes on its flat top: the triangles visible from straight above (a top-down
 z-buffer) that tilt less than an angle you set live with the **Design area** slider under

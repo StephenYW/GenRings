@@ -18,8 +18,12 @@ of finding the design area:
   connected to the centre of the top that tilt less than RECESS_MAX_TILT_DEG,
   which takes in the floor and the small fillet where it meets the ridge's
   vertical inner wall, so the design fills all the space inside the ridge.
-  That floor is refined REFINE_LEVELS times; its vertices and faces come
-  first in the GLB. relief.json gives its box seen from above and outline.
+  The floor and the ridge's inner wall are refined REFINE_LEVELS times; the
+  floor's vertices and faces come first in the GLB, then the wall's. The
+  wall's vertices carry `_WALL` = (index of the floor-edge vertex below them,
+  how far up the wall they are, 0..1), so the viewer can stretch the wall
+  down to follow the floor when the design sinks it. relief.json gives the
+  floor's box seen from above and outline.
 - "tilt" (S Square), below.
 
 The "tilt" design area is the ring's flat top: the triangles visible from straight above (a top-down z-buffer) that
@@ -396,18 +400,46 @@ def build_recess(v: np.ndarray, f: np.ndarray):
             if ok[nb] and not floor[nb]:
                 floor[nb] = True
                 stack.append(nb)
-    print(f"  recessed floor: {floor.sum()} faces (of {len(f)})")
+    # the ridge's inner wall: the steep faces reached from the floor, below the ridge top
+    floor_y = cen[floor, 1].min()
+    ridge_top = v[:, 1].max()
+    steep = ~floor & (fn[:, 1] < np.cos(np.radians(RECESS_MAX_TILT_DEG))) & (fn[:, 1] > -0.3) \
+        & (cen[:, 1] > floor_y - 0.05) & (cen[:, 1] < ridge_top)
+    wall = np.zeros(len(f), bool)
+    stack = list(np.where(floor)[0])
+    while stack:
+        for nb in nbrs[stack.pop()]:
+            if steep[nb] and not wall[nb]:
+                wall[nb] = True
+                stack.append(nb)
+    print(f"  recessed floor: {floor.sum()} faces; inner wall: {wall.sum()} faces (of {len(f)})")
 
-    v, f, floor = refine(v, f, floor, REFINE_LEVELS)
-    f = np.r_[f[floor], f[~floor]]
-    n_faces = int(floor.sum())
+    labels = np.where(floor, 1, np.where(wall, 2, 0)).astype(np.int8)
+    v, f, labels = refine(v, f, labels, REFINE_LEVELS)
+    f = np.r_[f[labels == 1], f[labels == 2], f[labels == 0]]
+    n_faces, n_wall_faces = int((labels == 1).sum()), int((labels == 2).sum())
     in_region = np.zeros(len(v), bool)
     in_region[np.unique(f[:n_faces])] = True
-    order = np.r_[np.where(in_region)[0], np.where(~in_region)[0]]
+    in_wall = np.zeros(len(v), bool)
+    in_wall[np.unique(f[n_faces:n_faces + n_wall_faces])] = True
+    in_wall &= ~in_region
+    order = np.r_[np.where(in_region)[0], np.where(in_wall)[0], np.where(~in_region & ~in_wall)[0]]
     remap = np.empty(len(v), np.int64)
     remap[order] = np.arange(len(v))
     v, f = v[order], remap[f]
-    n_region = int(in_region.sum())
+    n_region, n_wall = int(in_region.sum()), int(in_wall.sum())
+
+    # each wall vertex: the floor-edge vertex below it (nearest seen from
+    # above) and how far up the wall it is (0 at that edge, 1 at the wall's top)
+    edge_v = np.unique(boundary_edges(f[:n_faces]))
+    wv = v[n_region:n_region + n_wall]
+    j, _ = nearest(wv[:, [0, 2]], v[edge_v][:, [0, 2]])
+    base_y, top_y = v[edge_v[j], 1], wv[:, 1].max()
+    t = np.clip((wv[:, 1] - base_y) / np.maximum(top_y - base_y, 1e-6), 0, 1)
+    t[wv[:, 1] > top_y - 0.005] = 1.0
+    wall_attr = np.full((len(v), 2), [-1.0, 0.0])
+    wall_attr[n_region:n_region + n_wall, 0] = edge_v[j]
+    wall_attr[n_region:n_region + n_wall, 1] = t
 
     rv = v[:n_region]
     x0, x1, z0, z1 = rv[:, 0].min(), rv[:, 0].max(), rv[:, 2].min(), rv[:, 2].max()
@@ -419,7 +451,8 @@ def build_recess(v: np.ndarray, f: np.ndarray):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     c = cv2.approxPolyDP(max(contours, key=cv2.contourArea), 1.0, True).reshape(-1, 2)
     outline = [[round(float((p[0] - 1) * ZBUFFER_MM - w / 2), 3), round(float((p[1] - 1) * ZBUFFER_MM - h / 2), 3)] for p in c]
-    print(f"  refined: {len(f)} faces ({n_faces} floor), {len(v)} vertices; floor {w:.2f} x {h:.2f} mm")
+    print(f"  refined: {len(f)} faces ({n_faces} floor, {n_wall_faces} wall), {len(v)} vertices; "
+          f"floor {w:.2f} x {h:.2f} mm; wall {top_y - base_y.mean():.2f} mm tall")
     info = {
         "mode": "recess",
         "face_width_mm": round(float(w), 3),
@@ -428,10 +461,11 @@ def build_recess(v: np.ndarray, f: np.ndarray):
         "outline_xz_mm": outline,
         "region_vertex_count": n_region,
         "region_face_count": n_faces,
+        "wall_vertex_count": n_wall,
         "max_tilt_deg": RECESS_MAX_TILT_DEG,
         "uv": "top-down: u = (x - x0) / face_width_mm ; v = (z - z0) / face_height_mm ; image row 0 at -Z",
     }
-    return v, f, info
+    return v, f, info, wall_attr
 
 
 # --- main ------------------------------------------------------------------------
@@ -469,8 +503,12 @@ def main() -> None:
             dia = inner_diameter(v, f)
             if is_relief:
                 print(f"{folder} {size}: building the design area ({mode})")
-                v, f, info = build_relief(v, f) if mode == "tilt" else build_recess(v, f)
-                write_glb(OUT_DIR / rel, f"{size}_{folder}", v, f)
+                if mode == "tilt":
+                    v, f, info = build_relief(v, f)
+                    write_glb(OUT_DIR / rel, f"{size}_{folder}", v, f)
+                else:
+                    v, f, info, wall_attr = build_recess(v, f)
+                    write_glb(OUT_DIR / rel, f"{size}_{folder}", v, f, {"_WALL": wall_attr})
                 info.update({"shape": folder, "size": size, "file": rel, "inner_diameter_mm": round(dia, 3),
                              "vertex_count": len(v)})
                 reliefs[f"{folder}/{size}"] = info

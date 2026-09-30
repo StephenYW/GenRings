@@ -399,7 +399,12 @@ async function selectRing(shape, size) {
       const e = tiltEntry(state.faceTiltDeg);
       setFaceSize(e.width_mm, e.height_mm, e.outline_xz_mm);
     } else {
-      state.reliefBase = { pos, nrm, n: info.region_vertex_count };
+      state.reliefBase = {
+        pos, nrm, n: info.region_vertex_count,
+        // the ridge's inner wall: (floor-edge vertex below, height up the wall 0..1) per vertex
+        wall: geo.attributes._wall ? geo.attributes._wall.array : null,
+        nWall: info.wall_vertex_count || 0,
+      };
       state.reliefBase.area = recessArea(state.reliefBase, info);
       setFaceSize(info.face_width_mm, info.face_height_mm, info.outline_xz_mm);
     }
@@ -794,11 +799,18 @@ function boxBlur(src, w, h, r) {
  *    meet the design's edge. Where the design has no height at the edge the
  *    band doesn't move.
  *
+ * 4. On a "recess" ring (the design fills the floor inside a ridge) the floor
+ *    moves straight up/down instead, and the ridge's inner wall stretches so
+ *    its foot follows the floor edge below it and its top stays at the ridge.
+ *
  * UV u runs along +X and v along +Z with image row 0 at -Z. The area's
  * recesses get the oxidized patina (see PATINA).
  */
 function displaceFace() {
-  const { pos: basePos, nrm, n, area } = state.reliefBase;
+  const { pos: basePos, nrm, n, area, wall, nWall } = state.reliefBase;
+  // recess rings move the floor straight up/down, so its edge stays directly
+  // under the ridge's wall, which then follows it (below)
+  const vertical = RINGS.relief.mode === "recess";
   const { inArea, edgeIdx, edgeDist, uv, rim, entry } = area;
   const src = state.previewCanvas;
   const w = src.width, h = src.height;
@@ -851,8 +863,20 @@ function displaceFace() {
       // 3. band: the cove meets the design's (displaced) edge
       d = displaceMm(edgeH[r]) * coveProfile(dist / blendMm);
     }
-    pos.setXYZ(i, basePos[3 * i] + nrm[3 * i] * d, basePos[3 * i + 1] + nrm[3 * i + 1] * d, basePos[3 * i + 2] + nrm[3 * i + 2] * d);
+    if (vertical) pos.setXYZ(i, basePos[3 * i], basePos[3 * i + 1] + d, basePos[3 * i + 2]);
+    else pos.setXYZ(i, basePos[3 * i] + nrm[3 * i] * d, basePos[3 * i + 1] + nrm[3 * i + 1] * d, basePos[3 * i + 2] + nrm[3 * i + 2] * d);
     col.setXYZ(i, shade, shade, shade);
+  }
+  // 4. recess rings: stretch the ridge's inner wall so its foot follows the
+  // floor edge below it (down where the design sinks it, up where it rises)
+  // while its top at the ridge stays put
+  if (vertical && wall) {
+    for (let i = n; i < n + nWall; i++) {
+      const e = wall[2 * i];
+      if (e < 0) continue;
+      const floorDy = pos.getY(e) - basePos[3 * e + 1];
+      pos.setY(i, basePos[3 * i + 1] + floorDy * (1 - wall[2 * i + 1]));
+    }
   }
   pos.needsUpdate = true;
   col.needsUpdate = true;
