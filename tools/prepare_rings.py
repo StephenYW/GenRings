@@ -12,10 +12,10 @@ Viewer axes: up = +Y, hole axis = Z, so (x, y, z)_viewer = (y, z, x)_source
 (a cyclic swap, so handedness is kept).
 
 The relief (heightmap) goes on one ring, RELIEF_SHAPE / RELIEF_SIZE. Its face
-region is the ring's top face: the triangles visible from straight above (a
+region is the ring's flat top: the triangles visible from straight above (a
 top-down z-buffer) that tilt less than FACE_MAX_TILT_DEG from flat and connect
-to the top -- the flat top and its rounded edge up to where it rolls over into
-the shoulders, which stay plain. That region is
+to the top. It stops where the top starts to round over, so the rounded edge
+and the shoulders stay plain. That region is
 refined REFINE_LEVELS times (each splits every triangle in 4) so the relief
 has enough vertices for fine detail, with the neighbouring triangles split to
 match so there are no cracks. Its vertices come first in the GLB, carry
@@ -52,7 +52,7 @@ RELIEF_SHAPE, RELIEF_SIZE = "Square", "S"
 REFINE_LEVELS = 2       # 0.17 mm source edges -> ~0.04 mm on the face
 ZBUFFER_MM = 0.02       # top-down visibility raster resolution
 EDGE_BLEND_MM = 0.2     # relief eases out over this distance before the region's edge
-FACE_MAX_TILT_DEG = 45  # the top face ends where its rounded edge tilts past this (into the shoulders)
+FACE_MAX_TILT_DEG = 2   # the relief stays on the flat top: it ends where the surface starts to tilt
 
 
 # --- mesh io -------------------------------------------------------------------
@@ -292,7 +292,7 @@ def build_relief(v: np.ndarray, f: np.ndarray):
         "top_y_mm": round(float(rv[:, 1].max()), 3),
         "edge_blend_mm": EDGE_BLEND_MM,
         "uv": "u = (x - xmin) / face_width ; v = (z - zmin) / face_height ; image row 0 at -Z",
-        "note": f"region = the top face: visible from above and tilted < {FACE_MAX_TILT_DEG} deg (flat top + rounded edge)",
+        "note": f"region = the flat top: visible from above and tilted < {FACE_MAX_TILT_DEG} deg",
     }
     return v, f, uv, weight, n_region, info
 

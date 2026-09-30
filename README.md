@@ -13,7 +13,7 @@ the gallery — there's no hidden batching. Click it again to add another for co
 
 The 3D preview shows real signet ring models from a library of 10 shapes in UK sizes H–Z
 (pick one from the menu), and applies the design to one of them, **S Square**, over its
-square top face — about 14.2mm x 13.9mm, read from `static/rings/relief.json`.
+flat square top — about 12.7mm x 12.7mm, read from `static/rings/relief.json`.
 The minimum-feature rules exist because fine detail doesn't survive manufacturing at that
 size. Once you pick a candidate, drag/zoom a crop box over the full
 source image to choose exactly what lands on the face — see "Crop, pan & zoom" below.
@@ -86,11 +86,11 @@ Every ring gets the same polished silver (see "Metal look").
 ### Where the design goes
 
 The heightmap is applied to one ring, `RELIEF_SHAPE` / `RELIEF_SIZE` in the script (S
-Square), over its top face: the triangles visible from straight above (a top-down
-z-buffer) that tilt less than `FACE_MAX_TILT_DEG` (45°) and connect to the top — the flat
-square top and its rounded edge, up to where it rolls over into the shoulders, which stay
-plain. That face's footprint from above sets the heightmap's size (14.16mm x 13.88mm, so
-the crop box is nearly square) and outline, which `app/config.py` reads from
+Square), over its flat top: the triangles visible from straight above (a top-down
+z-buffer) that tilt less than `FACE_MAX_TILT_DEG` (2°) and connect to the top. It stops
+where the top starts to round over, so the rounded edge and shoulders stay plain. That
+area's footprint from above sets the heightmap's size (about 12.7mm x 12.7mm, so the
+crop box is square) and outline, which `app/config.py` reads from
 `relief.json`, so the backend and viewer always agree. The design is never clipped to
 that outline.
 
@@ -98,11 +98,10 @@ The script refines the region's mesh twice (each pass splits every triangle in f
 to ~0.04mm edges) so the relief has enough vertices for fine detail, splitting the
 neighbouring triangles to match so there are no cracks. The region's vertices come first
 in the GLB, with top-down UVs (u along X, v along Z, image row 0 at -Z) and a `_weight`
-attribute that eases the relief out over the last 0.2mm before the face's edge, so the
-plain shoulders meet it without a step.
+attribute that eases the relief out over the last 0.2mm, so it finishes on the flat.
 
-The viewer (`displaceFace` in `static/main.js`) pushes each top-face vertex out along its
-surface normal by the heightmap: straight up on the flat top, angled on the rounded edge.
+The viewer (`displaceFace` in `static/main.js`) pushes each flat-top vertex out along its
+surface normal (straight up) by the heightmap.
 Other rings show without a design, and the menu says so.
 The STL export is still the plain rectangular relief slab.
 

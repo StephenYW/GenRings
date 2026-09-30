@@ -26,9 +26,9 @@ const state = {
  * The ring library (tools/prepare_rings.py): every shape in UK sizes H-Z as
  * static/rings/<Shape>/<Size>.glb, listed in catalog.json. One ring (S
  * Square for now, see relief.json) carries the relief: its vertices
- * 0..region_vertex_count-1 are its top face (the flat top and its rounded
- * edge, up to where it rolls over into the shoulders), with top-down UVs and a
- * per-vertex weight that eases the relief out at the face's edge.
+ * 0..region_vertex_count-1 are its flat top (up to where it starts to round
+ * over), with top-down UVs and a per-vertex weight that eases the relief out
+ * at the edge of the flat.
  */
 const RINGS = {
   catalog: null,
@@ -479,10 +479,10 @@ function boxBlur(src, w, h, r) {
 
 /**
  * Apply the heightmap to the relief ring. Each vertex of its top face is
- * pushed out along its (undisplaced) surface normal by the heightmap sampled
- * at its top-down UV -- straight up on the flat top, angled on the rounded
- * edge -- times its edge weight, which eases the relief out right at the
- * face's edge so the plain shoulders below meet it without a step.
+ * pushed out along its (undisplaced) surface normal (straight up) by the
+ * heightmap sampled at its top-down UV, times its edge weight, which eases
+ * the relief out just inside the edge of the flat so it never reaches the
+ * rounded edge.
  * UV u runs along +X and v along +Z with image row 0 at -Z. Recesses get the
  * oxidized patina (see PATINA).
  */

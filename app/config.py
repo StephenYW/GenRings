@@ -11,8 +11,8 @@ load_dotenv()
 
 # --- Ring face geometry ---------------------------------------------------
 # The relief goes on one ring from the library (S Square for now) and covers
-# its top face: the flat top and its rounded edge, up to where the edge rolls
-# over into the shoulders. That region's bounding box (the heightmap's size)
+# its flat top, ending where the top starts to round over. That region's
+# bounding box (the heightmap's size)
 # and outline come from static/rings/relief.json, written by
 # tools/prepare_rings.py, so the backend and 3D viewer can't drift apart. The
 # fallback is only used if that file hasn't been generated.
