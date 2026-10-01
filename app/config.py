@@ -86,6 +86,12 @@ BG_REMOVAL_MODEL = os.getenv("BG_REMOVAL_MODEL", "isnet-general-use")
 # (flat, zero) background, so its silhouette always reads.
 SUBJECT_BASE_LEVEL = 0.2
 
+# --- Image enhancement (app/enhance.py, app/processing.py) -------------------
+DEPTH_INPUT_PX = 518            # depth model's working size (long side, multiple of 14)
+BAS_RELIEF_SCALES_MM = (1.5, 0.3)  # bas-relief: form broader than 1.5 mm squashed most, finer than 0.3 mm kept
+DEPTH_DETAIL_SCALE_MM = 0.4    # with depth: brightness detail finer than this is blended back on top
+ENGRAVE_MAX_DEPTH = 0.5         # outlines/hatching cut at most this fraction of the relief height
+
 # --- Material ---------------------------------------------------
 # 935 silver (93.5% silver, the rest copper): 1 / (0.935/10.49 + 0.065/8.96) g/cm3
 SILVER_ALLOY = "935"

@@ -1232,6 +1232,16 @@ function currentParams() {
     face_tilt_deg: state.faceTiltDeg,
     ridge_shift_mm: RINGS.relief && RINGS.relief.mode === "recess" ? state.ridgeShiftMm : null,
     remove_background: document.getElementById("removeBg").checked,
+    height_source: document.getElementById("heightSource").value,
+    depth_detail: parseFloat(document.getElementById("depthDetail").value),
+    bas_relief: parseFloat(document.getElementById("basRelief").value),
+    denoise: document.getElementById("denoise").checked,
+    upscale: document.getElementById("upscale").checked,
+    smooth_mm: parseFloat(document.getElementById("smoothMm").value),
+    outline_strength: parseFloat(document.getElementById("outlineStrength").value),
+    hatch_strength: parseFloat(document.getElementById("hatchStrength").value),
+    hatch_spacing_mm: parseFloat(document.getElementById("hatchSpacing").value),
+    hatch_angle_deg: parseFloat(document.getElementById("hatchAngle").value),
   };
 }
 
@@ -1265,8 +1275,12 @@ function renderReport(report) {
 
 async function refreshFromBackend() {
   if (!state.selectedCandidateId) return;
-  setStatus("processStatus", document.getElementById("removeBg").checked
-    ? "Processing (finding the subject: the first time can take a minute)..."
+  const slow = [];
+  if (document.getElementById("removeBg").checked) slow.push("finding the subject");
+  if (document.getElementById("heightSource").value === "depth") slow.push("estimating depth");
+  if (document.getElementById("upscale").checked) slow.push("upscaling");
+  setStatus("processStatus", slow.length
+    ? `Processing (${slow.join(", ")}: the first time for an image can take a while)...`
     : "Processing...");
   try {
     const result = await processCandidate(state.selectedCandidateId, currentParams());
@@ -1359,6 +1373,20 @@ function wireUI(cfg) {
   });
   document.getElementById("invert").addEventListener("change", debouncedRefresh);
   document.getElementById("removeBg").addEventListener("change", debouncedRefresh);
+
+  // Image enhancement (app/processing.py, app/enhance.py): ring-agnostic
+  ["depthDetail", "basRelief", "smoothMm", "outlineStrength", "hatchStrength", "hatchSpacing", "hatchAngle"].forEach((id) => {
+    wireSliderDisplay(id);
+    document.getElementById(id).addEventListener("change", debouncedRefresh);
+  });
+  ["heightSource", "denoise", "upscale"].forEach((id) => document.getElementById(id).addEventListener("change", debouncedRefresh));
+  const syncEnhanceGroups = () => {
+    document.getElementById("depthDetailGroup").hidden = document.getElementById("heightSource").value !== "depth";
+    document.getElementById("hatchGroup").hidden = parseFloat(document.getElementById("hatchStrength").value) <= 0;
+  };
+  document.getElementById("heightSource").addEventListener("change", syncEnhanceGroups);
+  document.getElementById("hatchStrength").addEventListener("input", syncEnhanceGroups);
+  syncEnhanceGroups();
   document.getElementById("flipH").addEventListener("change", debouncedRefresh);
   document.getElementById("flipV").addEventListener("change", debouncedRefresh);
 

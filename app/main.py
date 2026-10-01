@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from app import background, config, prompts, storage
+from app import background, config, enhance, prompts, storage
 from app.imaging import cap_max_dimension, cover_fit_resize
 from app.processing import ProcessParams, process_image
 from app.providers import get_provider
@@ -72,6 +72,18 @@ class ProcessRequest(BaseModel):
     # Keep only the image's main subject: the background becomes a flat field
     # and the subject a raised plateau (see app/background.py).
     remove_background: bool = False
+    # Image enhancement (see app/processing.py and app/enhance.py). Ring-agnostic:
+    # every design ring gets these.
+    height_source: str = Field(default="brightness", pattern="^(brightness|depth)$")  # depth: AI 3D shape
+    upscale: bool = False            # AI 2x super-resolution of the source (cached per candidate)
+    denoise: bool = False            # edge-preserving cleanup of the source
+    bas_relief: float = Field(default=0.0, ge=0.0, le=1.0)
+    depth_detail: float = Field(default=0.0, ge=0.0, le=1.0)
+    outline_strength: float = Field(default=0.0, ge=0.0, le=1.0)
+    hatch_strength: float = Field(default=0.0, ge=0.0, le=1.0)
+    hatch_spacing_mm: float = Field(default=0.6, ge=0.2, le=2.0)
+    hatch_angle_deg: float = Field(default=45.0, ge=0.0, le=180.0)
+    smooth_mm: float = Field(default=0.0, ge=0.0, le=0.3)
 
 
 class ReportOut(BaseModel):
@@ -243,8 +255,15 @@ def process(req: ProcessRequest):
     # -- never against the image model.
     face_w, face_h, face_outline = config.face_geometry(req.relief_ring, req.face_tilt_deg, req.ridge_shift_mm)
     hm_w, hm_h = int(round(face_w * config.PX_PER_MM)), int(round(face_h * config.PX_PER_MM))
+    try:
+        source_rgb = enhance.cached_upscaled(d, full_rgb) if req.upscale else full_rgb
+        depth_full = enhance.cached_depth(d, full_rgb) if req.height_source == "depth" else None
+    except enhance.ModelUnavailable as err:
+        raise HTTPException(503, str(err))
+    crop = dict(zoom=req.crop_zoom, offset_x=req.crop_offset_x, offset_y=req.crop_offset_y)
+    depth = None if depth_full is None else cover_fit_resize(depth_full, hm_w, hm_h, **crop)
     rgb = cover_fit_resize(
-        full_rgb,
+        source_rgb,
         hm_w,
         hm_h,
         zoom=req.crop_zoom,
@@ -265,9 +284,11 @@ def process(req: ProcessRequest):
     if req.flip_h:
         rgb = np.ascontiguousarray(rgb[:, ::-1])
         mask = None if mask is None else np.ascontiguousarray(mask[:, ::-1])
+        depth = None if depth is None else np.ascontiguousarray(depth[:, ::-1])
     if req.flip_v:
         rgb = np.ascontiguousarray(rgb[::-1])
         mask = None if mask is None else np.ascontiguousarray(mask[::-1])
+        depth = None if depth is None else np.ascontiguousarray(depth[::-1])
 
     params = ProcessParams(
         invert=req.invert,
@@ -277,12 +298,21 @@ def process(req: ProcessRequest):
         levels=req.levels,
         min_feature_mm=req.min_feature_mm,
         relief_height_mm=req.relief_height_mm,
+        denoise=req.denoise,
+        bas_relief=req.bas_relief,
+        depth_detail=req.depth_detail,
+        outline_strength=req.outline_strength,
+        hatch_strength=req.hatch_strength,
+        hatch_spacing_mm=req.hatch_spacing_mm,
+        hatch_angle_deg=req.hatch_angle_deg,
+        smooth_mm=req.smooth_mm,
     )
 
     contains_text_request = prompts.mentions_text(meta.get("prompt", ""))
     heightmap_16bit, preview_8bit, report = process_image(
         rgb, params, contains_text_request, face_width_mm=face_w, face_height_mm=face_h, face_outline_mm=face_outline,
         subject_mask=None if mask is None else mask.astype(np.float32) / 255.0,
+        depth=depth,
     )
 
     storage.save_gray16_png(d / "heightmap.png", heightmap_16bit)
@@ -310,6 +340,16 @@ def process(req: ProcessRequest):
             "face_tilt_deg": req.face_tilt_deg,
             "ridge_shift_mm": req.ridge_shift_mm,
             "remove_background": req.remove_background,
+            "height_source": req.height_source,
+            "upscale": req.upscale,
+            "denoise": req.denoise,
+            "bas_relief": req.bas_relief,
+            "depth_detail": req.depth_detail,
+            "outline_strength": req.outline_strength,
+            "hatch_strength": req.hatch_strength,
+            "hatch_spacing_mm": req.hatch_spacing_mm,
+            "hatch_angle_deg": req.hatch_angle_deg,
+            "smooth_mm": req.smooth_mm,
             "crop_zoom": req.crop_zoom,
             "crop_offset_x": req.crop_offset_x,
             "crop_offset_y": req.crop_offset_y,

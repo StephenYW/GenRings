@@ -276,6 +276,40 @@ with its full range of detail. (Invert, which runs first, flips the subject's ow
 the background stays flat.) Swap in
 `birefnet-general` (~1 GB) for finer edges on hair and fur.
 
+### Image enhancement
+
+Ring-agnostic tools under **Image enhancement** in the panel. They live in
+`app/processing.py` (pure functions on heightmap-sized arrays) and `app/enhance.py` (AI
+models), know nothing about which ring the design is for, and apply to every design ring,
+so a new ring style gets them automatically. `process_image` runs them in this order:
+
+1. **Clean up image** (`denoise`, on by default): two edge-preserving bilateral passes,
+   so grain and compression noise don't become bumpy metal.
+2. **AI upscale 2x** (`upscale`): Real-ESRGAN x2 on the full image, in tiles, cached as
+   `upscaled.png` (~10 s on first use per image). Sharper source, smoother edges.
+3. **Height from: AI depth** (`height_source = "depth"`): Depth Anything V2 Small
+   estimates the photo's 3D shape (cached as `depth.png`, ~0.5 s), so height follows form
+   (a nose, a cheek) instead of brightness (where dark hair or shadows would sink).
+   **Fine detail** (`depth_detail`) blends the photo's texture finer than 0.4mm back on top.
+4. **Bas-relief compression** (`bas_relief`): as for coins and medals. Gradients steeper
+   than 3x the average are compressed in the gradient domain and the heightfield is
+   rebuilt with a Poisson solve; then shapes broader than 1.5mm shrink most, mid-scale
+   ones less, and detail under 0.3mm keeps its full height (`BAS_RELIEF_SCALES_MM`).
+5. **Remove background** (see below).
+6. **Engraved outlines** (`outline_strength`): XDoG edges of the image cut as grooves, and
+   **Hatching** (`hatch_strength`, `hatch_spacing_mm`, `hatch_angle_deg`): parallel lines
+   whose width follows the image's darkness, banknote style. Both cut at most
+   `ENGRAVE_MAX_DEPTH` (half the relief height).
+7. Quantize and minimum feature size, as before.
+8. **Smooth edges** (`smooth_mm`, 0.04mm by default): a final light blur that turns
+   stair-stepped walls between heights into short slopes, so edges in the metal look
+   smooth rather than jagged.
+
+The two models (ONNX, run on the CPU with onnxruntime, no PyTorch) download once to
+`~/.cache/silversignal/models` (about 100MB + 67MB; `SILVERSIGNAL_MODELS_DIR` overrides).
+The UI defaults to brightness with cleanup and edge smoothing on; for photos, try AI depth
+with fine detail ~0.5 and bas-relief ~0.6.
+
 ### Uploading your own photo/artwork
 
 `POST /api/upload` (multipart file, PNG/JPEG/WEBP, 15MB max) skips the AI step entirely:
