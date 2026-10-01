@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from app import config, prompts, storage
+from app import background, config, prompts, storage
 from app.imaging import cap_max_dimension, cover_fit_resize
 from app.processing import ProcessParams, process_image
 from app.providers import get_provider
@@ -69,6 +69,9 @@ class ProcessRequest(BaseModel):
     # For a "recess" ring: how far its ridge's inner wall is slid outward (mm),
     # which widens the floor the design fills (the viewer's "ridge wall" slider).
     ridge_shift_mm: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    # Keep only the image's main subject: the background becomes a flat field
+    # and the subject a raised plateau (see app/background.py).
+    remove_background: bool = False
 
 
 class ReportOut(BaseModel):
@@ -98,6 +101,8 @@ def get_config():
         "heightmap_width_px": config.HEIGHTMAP_WIDTH_PX,
         "heightmap_height_px": config.HEIGHTMAP_HEIGHT_PX,
         "relief_max_mm": config.RELIEF_MAX_MM,
+        "silver_alloy": config.SILVER_ALLOY,
+        "silver_density_g_cm3": config.SILVER_DENSITY_G_CM3,
         "edge_margin_mm": config.EDGE_MARGIN_MM,
         "edge_feather_mm": config.EDGE_FEATHER_MM,
         "min_feature_mm": config.MIN_FEATURE_MM,
@@ -247,10 +252,22 @@ def process(req: ProcessRequest):
         offset_y=req.crop_offset_y,
     )
 
+    mask = None
+    if req.remove_background:
+        try:
+            mask_full = background.cached_subject_mask(d, full_rgb)
+        except background.BackgroundRemovalUnavailable as err:
+            raise HTTPException(503, str(err))
+        # the same crop/zoom/pan as the image
+        mask = cover_fit_resize(mask_full, hm_w, hm_h, zoom=req.crop_zoom,
+                                offset_x=req.crop_offset_x, offset_y=req.crop_offset_y)
+
     if req.flip_h:
         rgb = np.ascontiguousarray(rgb[:, ::-1])
+        mask = None if mask is None else np.ascontiguousarray(mask[:, ::-1])
     if req.flip_v:
         rgb = np.ascontiguousarray(rgb[::-1])
+        mask = None if mask is None else np.ascontiguousarray(mask[::-1])
 
     params = ProcessParams(
         invert=req.invert,
@@ -264,7 +281,8 @@ def process(req: ProcessRequest):
 
     contains_text_request = prompts.mentions_text(meta.get("prompt", ""))
     heightmap_16bit, preview_8bit, report = process_image(
-        rgb, params, contains_text_request, face_width_mm=face_w, face_height_mm=face_h, face_outline_mm=face_outline
+        rgb, params, contains_text_request, face_width_mm=face_w, face_height_mm=face_h, face_outline_mm=face_outline,
+        subject_mask=None if mask is None else mask.astype(np.float32) / 255.0,
     )
 
     storage.save_gray16_png(d / "heightmap.png", heightmap_16bit)
@@ -291,6 +309,7 @@ def process(req: ProcessRequest):
             "relief_ring": req.relief_ring or config.DEFAULT_RELIEF_RING,
             "face_tilt_deg": req.face_tilt_deg,
             "ridge_shift_mm": req.ridge_shift_mm,
+            "remove_background": req.remove_background,
             "crop_zoom": req.crop_zoom,
             "crop_offset_x": req.crop_offset_x,
             "crop_offset_y": req.crop_offset_y,

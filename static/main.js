@@ -14,7 +14,8 @@ const state = {
   previewCanvas: null,     // offscreen canvas holding the current 8-bit preview (grayscale)
   exaggeration: 1,
   faceTiltDeg: 8,         // design area edge: the relief ring's top that tilts less than this (set from relief.json)
-  ridgeShiftMm: 0.3,      // recess rings: how far the ridge's inner wall is slid outward (the "Ridge wall" slider)
+  ridgeShiftMm: 0.3,
+  ringVolumeMm3: null,    // the ring on show, with the design at its true height (for the total weight)      // recess rings: how far the ridge's inner wall is slid outward (the "Ridge wall" slider)
   reliefMesh: null,       // the ring mesh that carries the relief (only the relief ring, see RINGS)
   reliefBase: null,       // its undisplaced positions/normals, uv, relief weights and region size
   debounceTimer: null,
@@ -416,6 +417,7 @@ async function selectRing(shape, size) {
     mesh.material = getSilverMaterial();
     state.reliefMesh = null;
     state.reliefBase = null;
+    state.ringVolumeMm3 = meshVolume(geo.attributes.position.array, geo.index.array);
   }
 
   // Swap it in, keeping the turntable angle, and free the old one.
@@ -427,6 +429,7 @@ async function selectRing(shape, size) {
   RINGS.current = { shape, size };
   frameRing();
   if (relief) updateMeshHeights();
+  updateRingWeight();
   syncRingMenu();
   setRingBadge(label);
 }
@@ -705,6 +708,27 @@ function edgeLoop(pos, idx) {
   return { idx: Int32Array.from(idx), kStart: Int32Array.from(kStart), kIdx: Int32Array.from(kIdx), kW: Float32Array.from(kW) };
 }
 
+/** Volume (mm^3) of a closed triangle mesh: the sum of signed tetrahedra to the origin. */
+function meshVolume(pos, index) {
+  let v = 0;
+  for (let t = 0; t < index.length; t += 3) {
+    const a = 3 * index[t], b = 3 * index[t + 1], c = 3 * index[t + 2];
+    v += pos[a] * (pos[b + 1] * pos[c + 2] - pos[b + 2] * pos[c + 1])
+       - pos[a + 1] * (pos[b] * pos[c + 2] - pos[b + 2] * pos[c])
+       + pos[a + 2] * (pos[b] * pos[c + 1] - pos[b + 1] * pos[c]);
+  }
+  return Math.abs(v) / 6;
+}
+
+/** Show the ring's total estimated weight in the report (the ring on show, design at true height). */
+function updateRingWeight() {
+  const el = document.getElementById("ringWeight");
+  if (!el || state.ringVolumeMm3 == null) return;
+  const density = state.cfg.silver_density_g_cm3 || 10.37, alloy = state.cfg.silver_alloy || "935";
+  const grams = (state.ringVolumeMm3 / 1000) * density;
+  el.textContent = `Total ring weight (${alloy} silver): ${grams.toFixed(2)} g (${state.ringVolumeMm3.toFixed(0)} mm³)`;
+}
+
 /** Aim the camera at the ring's centre, from the same direction, at a distance that fits it. */
 function frameRing() {
   const box = new THREE.Box3().setFromObject(ringGroup);
@@ -904,9 +928,12 @@ function displaceFace() {
   const geo = state.reliefMesh.geometry;
   const pos = geo.attributes.position;
   const col = geo.attributes.color;
+  // the same shape at the design's true height (exaggeration 1), for the ring's weight
+  const truePos = Float32Array.from(basePos);
+  const displace1 = (height) => reliefMax * height;
   for (let i = 0; i < n; i++) {
     const r = edgeIdx[i], dist = edgeDist[i];
-    let d = 0, shade = 1;
+    let d = 0, d1 = 0, shade = 1;
     if (inArea[i]) {
       // 2. design area
       const u = uv[2 * i], v = uv[2 * i + 1];
@@ -919,12 +946,20 @@ function displaceFace() {
       }
       shade = 1 - PATINA.darkness * smoothstep(cavity * PATINA.strength) * t;
       d = vertical ? recessLift + reliefMax * (height - top) * exag : displaceMm(height);
+      d1 = vertical ? recessLift + reliefMax * (height - top) : displace1(height);
     } else if (r >= 0) {
       // 3. band: the cove meets the design's (displaced) edge
-      d = displaceMm(edgeH[r]) * coveProfile(dist / blendMm);
+      const cove = coveProfile(dist / blendMm);
+      d = displaceMm(edgeH[r]) * cove;
+      d1 = displace1(edgeH[r]) * cove;
     }
-    if (vertical) pos.setXYZ(i, basePos[3 * i], basePos[3 * i + 1] + d, basePos[3 * i + 2]);
-    else pos.setXYZ(i, basePos[3 * i] + nrm[3 * i] * d, basePos[3 * i + 1] + nrm[3 * i + 1] * d, basePos[3 * i + 2] + nrm[3 * i + 2] * d);
+    if (vertical) {
+      pos.setXYZ(i, basePos[3 * i], basePos[3 * i + 1] + d, basePos[3 * i + 2]);
+      truePos[3 * i + 1] += d1;
+    } else {
+      pos.setXYZ(i, basePos[3 * i] + nrm[3 * i] * d, basePos[3 * i + 1] + nrm[3 * i + 1] * d, basePos[3 * i + 2] + nrm[3 * i + 2] * d);
+      truePos[3 * i] += nrm[3 * i] * d1; truePos[3 * i + 1] += nrm[3 * i + 1] * d1; truePos[3 * i + 2] += nrm[3 * i + 2] * d1;
+    }
     col.setXYZ(i, shade, shade, shade);
   }
   // 4. recess rings: stretch the ridge's inner wall so its foot follows the
@@ -936,8 +971,11 @@ function displaceFace() {
       if (e < 0) continue;
       const floorDy = pos.getY(e) - basePos[3 * e + 1];
       pos.setY(i, basePos[3 * i + 1] + floorDy * (1 - wall[2 * i + 1]));
+      truePos[3 * i + 1] = basePos[3 * i + 1] + (truePos[3 * e + 1] - basePos[3 * e + 1]) * (1 - wall[2 * i + 1]);
     }
   }
+  state.ringVolumeMm3 = meshVolume(truePos, geo.index.array);
+  updateRingWeight();
   pos.needsUpdate = true;
   col.needsUpdate = true;
   geo.computeVertexNormals();
@@ -1193,6 +1231,7 @@ function currentParams() {
     relief_ring: RINGS.reliefKey,
     face_tilt_deg: state.faceTiltDeg,
     ridge_shift_mm: RINGS.relief && RINGS.relief.mode === "recess" ? state.ridgeShiftMm : null,
+    remove_background: document.getElementById("removeBg").checked,
   };
 }
 
@@ -1208,7 +1247,8 @@ function renderReport(report) {
   box.innerHTML = `
     <div>Coverage: ${report.coverage_percent.toFixed(1)}%</div>
     <div>Relief volume: ${report.relief_volume_mm3.toFixed(2)} mm&sup3;</div>
-    <div>Estimated weight (silver, relief only): ${report.estimated_weight_g.toFixed(3)} g</div>
+    <div id="ringWeight"></div>
+    <div>Relief alone: ${report.estimated_weight_g.toFixed(3)} g</div>
     <div class="${passClass}">${report.passed ? "Looks manufacturable" : "Needs attention"}</div>
   `;
   const warningsBox = document.getElementById("warningsBox");
@@ -1220,11 +1260,14 @@ function renderReport(report) {
     warningsBox.appendChild(div);
   }
   document.getElementById("reportSection").hidden = false;
+  updateRingWeight();
 }
 
 async function refreshFromBackend() {
   if (!state.selectedCandidateId) return;
-  setStatus("processStatus", "Processing...");
+  setStatus("processStatus", document.getElementById("removeBg").checked
+    ? "Processing (finding the subject: the first time can take a minute)..."
+    : "Processing...");
   try {
     const result = await processCandidate(state.selectedCandidateId, currentParams());
     const canvas = await loadImageToCanvas(result.preview_url + `?t=${Date.now()}`);
@@ -1315,6 +1358,7 @@ function wireUI(cfg) {
     document.getElementById(id).addEventListener("change", debouncedRefresh);
   });
   document.getElementById("invert").addEventListener("change", debouncedRefresh);
+  document.getElementById("removeBg").addEventListener("change", debouncedRefresh);
   document.getElementById("flipH").addEventListener("change", debouncedRefresh);
   document.getElementById("flipV").addEventListener("change", debouncedRefresh);
 

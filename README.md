@@ -262,6 +262,20 @@ text it draws gets flattened/quantized/min-feature-filtered along with everythin
 reliably comes out as illegible blobs once converted to relief — so the prompt templates
 explicitly ask for none, and no attempt is made to strip or repair it if it appears anyway.
 
+### Removing the background
+
+The **Remove background** checkbox keeps only the image's main subject, on either design
+ring. A segmentation model (rembg, `BG_REMOVAL_MODEL` in `app/config.py`, default
+`isnet-general-use`, ~180 MB, downloaded once to `~/.rembg` and run locally on the CPU in
+about a second) finds the subject in the candidate's full image; the mask is cached as
+`subject_mask.png` next to it, so crop/zoom/pan and slider changes never re-run it. On each
+`/api/process` with `remove_background`, the mask gets the same crop and flips as the image,
+then `apply_subject_mask` flattens the background to zero and re-stretches the subject's
+own tones to `SUBJECT_BASE_LEVEL`..1 (0.2..1), so the subject stands on a raised plateau
+with its full range of detail. (Invert, which runs first, flips the subject's own tones;
+the background stays flat.) Swap in
+`birefnet-general` (~1 GB) for finer edges on hair and fur.
+
 ### Uploading your own photo/artwork
 
 `POST /api/upload` (multipart file, PNG/JPEG/WEBP, 15MB max) skips the AI step entirely:
@@ -318,9 +332,13 @@ processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `mod
 - No path traversal protection was needed beyond validating design ids are the uuid4 hex
   strings we generate ourselves (`storage._safe_id`), since there's no auth/multi-tenant
   concern in this MVP.
-- Weight/volume in the report account for the **relief only** (matches the spec), not the
-  base plate — a real ring's total silver weight would also include the plain base slab
-  and shank, which are out of scope for this MVP.
+- The report shows the **total ring weight** in 935 silver (93.5% silver, the rest copper:
+  `SILVER_DENSITY_G_CM3` = 10.37 g/cm³ in `app/config.py`). The viewer computes it from the
+  volume of the ring on show (its mesh is watertight; signed-tetrahedron sum,
+  `meshVolume` in `static/main.js`) with the design applied at its true height — whatever
+  the preview exaggeration — including the cove on Square and the raised floor and moved
+  ridge wall on Square (ridged). E.g. S Square with a small emblem is about 17.95 g. The
+  report also still gives the relief's own volume and weight (same density).
 
 ## Known limitations
 

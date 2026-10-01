@@ -76,8 +76,20 @@ MIN_FEATURE_MM = 0.25
 # "raised" and wildly overstate coverage and edge-margin clipping.
 RAISED_THRESHOLD = 0.02
 
+# --- Background removal ---------------------------------------------------
+# rembg model used to find the main subject (see app/background.py).
+# "isnet-general-use" (~180 MB) is a good all-rounder; "birefnet-general"
+# (~1 GB) gives finer edges; "u2net" (~170 MB) is the classic default.
+BG_REMOVAL_MODEL = os.getenv("BG_REMOVAL_MODEL", "isnet-general-use")
+# With the background removed, the subject sits on a raised plateau: its
+# lowest point is this fraction of the full relief height above the
+# (flat, zero) background, so its silhouette always reads.
+SUBJECT_BASE_LEVEL = 0.2
+
 # --- Material ---------------------------------------------------
-SILVER_DENSITY_G_CM3 = 10.49
+# 935 silver (93.5% silver, the rest copper): 1 / (0.935/10.49 + 0.065/8.96) g/cm3
+SILVER_ALLOY = "935"
+SILVER_DENSITY_G_CM3 = 10.37
 
 # --- STL export (stretch milestone) ---------------------------------------------------
 BASE_THICKNESS_MM = 1.0

@@ -27,6 +27,7 @@ class ProcessParams:
     relief_height_mm: float = 0.25
     edge_margin_mm: float = config.EDGE_MARGIN_MM
     edge_feather_mm: float = config.EDGE_FEATHER_MM
+    subject_base: float = config.SUBJECT_BASE_LEVEL  # with a subject mask: the subject's lowest level
 
 
 @dataclass
@@ -85,6 +86,19 @@ def normalize(gray: np.ndarray) -> np.ndarray:
     if hi - lo < 1e-6:
         return np.zeros_like(gray)
     return np.clip((gray - lo) / (hi - lo), 0.0, 1.0)
+
+
+def apply_subject_mask(gray: np.ndarray, mask01: np.ndarray, base: float) -> np.ndarray:
+    """Keep only the subject (mask01: 1 = subject, 0 = background, soft at the
+    edges): the background becomes flat 0, and the subject's own tones are
+    re-stretched to fill base..1, so it stands on a raised plateau with its
+    full range of detail. An empty mask leaves a blank image."""
+    inside = mask01 > 0.5
+    if not inside.any():
+        return np.zeros_like(gray)
+    lo, hi = float(gray[inside].min()), float(gray[inside].max())
+    g = np.clip((gray - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
+    return (mask01 * (base + (1.0 - base) * g)).astype(np.float32)
 
 
 def quantize(gray: np.ndarray, levels: int) -> np.ndarray:
@@ -303,10 +317,13 @@ def process_image(
     face_width_mm: float = config.FACE_WIDTH_MM,
     face_height_mm: float = config.FACE_HEIGHT_MM,
     face_outline_mm=config.FACE_OUTLINE_MM,
+    subject_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, ProcessReport]:
     """
     Full pipeline: raw RGB image -> (heightmap_16bit, preview_8bit, report),
     for a design area of face_width_mm x face_height_mm (PX_PER_MM px per mm).
+    `subject_mask` (float 0..1, same shape as img_rgb; 1 = subject) removes the
+    background: see apply_subject_mask.
     """
     gray = to_grayscale(img_rgb)
     gray = resize_to_heightmap(
@@ -316,6 +333,9 @@ def process_image(
     gray = apply_gamma_contrast(gray, params.gamma, params.contrast)
     gray = apply_blur(gray, params.blur_mm)
     gray = normalize(gray)
+    if subject_mask is not None:
+        mask01 = cv2.resize(subject_mask.astype(np.float32), (gray.shape[1], gray.shape[0]), interpolation=cv2.INTER_AREA)
+        gray = apply_subject_mask(gray, mask01, params.subject_base)
 
     if params.levels and params.levels >= 2:
         gray = quantize(gray, params.levels)
