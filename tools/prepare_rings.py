@@ -33,12 +33,11 @@ tilt less than an angle the viewer sets live (a slider, default
 DEFAULT_TILT_DEG, up to TILT_MAX_DEG). So the viewer can recompute that area
 without a rebuild, the script prepares everything any angle could need:
 
-- The "zone": the top faces up to TILT_MAX_DEG plus the band around them (the
-  rounded edge and upper shoulders, within BLEND_MM, which the viewer bends to
-  meet the design at the edge). It is refined REFINE_LEVELS times (each splits
-  every triangle in 4), with the neighbouring triangles split to match so
-  there are no cracks. In the GLB, the top faces come first, then the band's,
-  then the rest; the zone's vertices likewise come first.
+- The "zone": the top faces up to TILT_MAX_DEG. It is refined REFINE_LEVELS
+  times (each splits every triangle in 4), with the neighbouring triangles
+  split to match so there are no cracks. In the GLB the zone's faces and
+  vertices come first. The band around the top is left as it is: the design
+  ends at the area's edge with a hard edge.
 - relief.json's `tilt_table`: for every TILT_STEP_DEG, the flat top's bounding
   box seen from above (which the heightmap and crop box cover, and the viewer
   maps its top-down UVs to) and its outline.
@@ -83,8 +82,6 @@ ZBUFFER_MM = 0.02       # top-down visibility raster resolution
 DEFAULT_TILT_DEG = 8    # the design area: the top that tilts less than this (the viewer's slider starts here)
 TILT_MAX_DEG = 30       # the slider's range; the mesh is prepared for any angle up to this
 TILT_STEP_DEG = 0.5
-BLEND_MM = 2.5          # how far down the band the curve that meets the design reaches
-INNER_MM = 0.3          # on the flat top, the design eases into the (smoothed) edge height over this
 
 
 # --- mesh io -------------------------------------------------------------------
@@ -287,29 +284,6 @@ def nearest(points: np.ndarray, targets: np.ndarray) -> tuple[np.ndarray, np.nda
     return idx, dist
 
 
-def blend_band(v: np.ndarray, f: np.ndarray, region: np.ndarray, depth: float) -> np.ndarray:
-    """Faces of the band around `region` that the viewer bends to meet the
-    design: connected to the region, within `depth` (+ a margin) of its edge,
-    and not facing down (which keeps the finger hole's inner surface out)."""
-    fn = np.cross(v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]])
-    fn /= np.maximum(np.linalg.norm(fn, axis=1), 1e-12)[:, None]
-    rim = np.unique(boundary_edges(f[region]))
-    _, d = nearest(v[f].mean(1), v[rim])
-    cand = ~region & (fn[:, 1] > -0.5) & (d < depth + 0.3)
-    nbrs = [[] for _ in range(len(f))]
-    for a, b in face_adjacency(f):
-        nbrs[a].append(b)
-        nbrs[b].append(a)
-    band = np.zeros(len(f), bool)
-    stack = list(np.where(region)[0])
-    while stack:
-        for nb in nbrs[stack.pop()]:
-            if cand[nb] and not band[nb]:
-                band[nb] = True
-                stack.append(nb)
-    return band
-
-
 def tilt_table(f_tilt: np.ndarray, top: np.ndarray, ids: np.ndarray, origin) -> list[dict]:
     """For every TILT_STEP_DEG: the flat top's bounding box seen from above
     (viewer x/z, mm) and its outline (centred on the box), from the z-buffer."""
@@ -339,20 +313,18 @@ def tilt_table(f_tilt: np.ndarray, top: np.ndarray, ids: np.ndarray, origin) -> 
 
 def build_relief(v: np.ndarray, f: np.ndarray):
     """Prepare the relief ring for any design-area angle up to TILT_MAX_DEG:
-    refine the zone (top faces + blend band), order it first, and tabulate
+    refine the zone (top faces), order it first, and tabulate
     the flat top's size and outline per angle. Returns (verts, faces, info)."""
     top, ids, origin = top_face(v, f, TILT_MAX_DEG)
-    band = blend_band(v, f, top, BLEND_MM)
-    print(f"  top (< {TILT_MAX_DEG} deg): {top.sum()} faces; blend band: {band.sum()} faces (of {len(f)})")
+    print(f"  top (< {TILT_MAX_DEG} deg): {top.sum()} faces (of {len(f)})")
     fn = np.cross(v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]])
     f_tilt = np.degrees(np.arccos(np.clip(fn[:, 1] / np.maximum(np.linalg.norm(fn, axis=1), 1e-12), -1, 1)))
     table = tilt_table(f_tilt, top, ids, origin)
 
-    labels = np.where(top, 1, np.where(band, 2, 0)).astype(np.int8)
-    v, f, labels = refine(v, f, labels, REFINE_LEVELS)
-    # faces: top, then band, then the rest; vertices: the zone's first
-    f = np.r_[f[labels == 1], f[labels == 2], f[labels == 0]]
-    n_top_faces, n_zone_faces = int((labels == 1).sum()), int((labels != 0).sum())
+    v, f, top = refine(v, f, top, REFINE_LEVELS)
+    # faces: the top first, then the rest; vertices: the zone's first
+    f = np.r_[f[top], f[~top]]
+    n_top_faces = n_zone_faces = int(top.sum())
     in_zone = np.zeros(len(v), bool)
     in_zone[np.unique(f[:n_zone_faces])] = True
     order = np.r_[np.where(in_zone)[0], np.where(~in_zone)[0]]
@@ -360,7 +332,7 @@ def build_relief(v: np.ndarray, f: np.ndarray):
     remap[order] = np.arange(len(v))
     v, f = v[order], remap[f]
     n_zone = int(in_zone.sum())
-    print(f"  refined: {len(f)} faces ({n_top_faces} top, {n_zone_faces - n_top_faces} band), "
+    print(f"  refined: {len(f)} faces ({n_top_faces} top), "
           f"{len(v)} vertices ({n_zone} in the zone); tilt table {len(table)} steps")
 
     default = min(table, key=lambda e: abs(e["deg"] - DEFAULT_TILT_DEG))
@@ -376,8 +348,6 @@ def build_relief(v: np.ndarray, f: np.ndarray):
         "top_face_count": n_top_faces,
         "zone_face_count": n_zone_faces,
         "zone_vertex_count": n_zone,
-        "blend_mm": BLEND_MM,
-        "inner_mm": INNER_MM,
         "uv": "top-down: u = (x - x0) / width_mm ; v = (z - z0) / height_mm ; image row 0 at -Z",
     }
     return v, f, info

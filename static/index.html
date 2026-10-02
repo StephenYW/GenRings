@@ -30,9 +30,6 @@
           <label for="designTilt">Design area: top tilting under <span id="designTiltVal"></span></label>
           <input type="range" id="designTilt" min="0.5" max="30" step="0.5" value="8" />
           <p class="hint">Lower keeps the design on the flattest part of the top; higher spreads it onto the rounded edge.</p>
-          <label for="coveSteepness">Edge cove steepness <span id="coveSteepnessVal"></span></label>
-          <input type="range" id="coveSteepness" min="1" max="8" step="0.5" value="3" />
-          <p class="hint">How sharply the band sweeps up into the design's edge.</p>
         </div>
         <div id="ridgeGroup" hidden>
           <label for="ridgeShift">Ridge wall: <span id="ridgeShiftVal"></span></label>
@@ -130,8 +127,9 @@
         <hr />
 
         <label>Preview exaggeration <span id="exaggerationVal"></span> <em>(display only)</em></label>
-        <p class="hint">Deepens the design downwards: its highest points stay at their true height.</p>
+        <p class="hint">Deepens the design downwards (its highest points stay at their true height), or raises the peaks from the base when exaggerating upward.</p>
         <input type="range" id="exaggeration" min="1" max="6" step="0.1" value="1" />
+        <label class="checkbox-row"><input type="checkbox" id="exaggerateUp" /> Exaggerate upward (raise the peaks instead)</label>
 
         <div id="processStatus" class="status"></div>
       </section>
@@ -153,6 +151,6 @@
     </main>
   </div>
 
-  <script type="module" src="/main.js?v=enhance1"></script>
+  <script type="module" src="/main.js?v=hardedge1"></script>
 </body>
 </html>

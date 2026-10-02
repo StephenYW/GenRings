@@ -13,6 +13,7 @@ const state = {
   candidates: [],
   previewCanvas: null,     // offscreen canvas holding the current 8-bit preview (grayscale)
   exaggeration: 1,
+  exaggerateUp: false,    // preview exaggeration grows peaks upward from the base instead of sinking the design downward
   faceTiltDeg: 8,         // design area edge: the relief ring's top that tilts less than this (set from relief.json)
   ridgeShiftMm: 0.3,
   ringVolumeMm3: null,    // the ring on show, with the design at its true height (for the total weight)      // recess rings: how far the ridge's inner wall is slid outward (the "Ridge wall" slider)
@@ -30,11 +31,10 @@ const state = {
  * static/rings/<Shape>/<Size>.glb, listed in catalog.json. One ring (S
  * Square for now, see relief.json) carries the relief on its flat top: the
  * part that tilts less than an angle set live with the "Design area" slider.
- * Its first zone_vertex_count vertices (and first zone_face_count faces, the
- * top faces first) are the area any angle up to the table's maximum could
- * touch: the top plus the band around it (rounded edge and upper shoulders),
- * which bends to meet the design's height at the edge. computeDesignArea
- * works out the design area for the angle; displaceFace applies the design.
+ * Its first zone_vertex_count vertices (and first zone_face_count faces) are
+ * the top faces any angle up to the table's maximum could include.
+ * computeDesignArea works out the design area for the angle; displaceFace
+ * applies the design, which ends at the area's edge with a hard edge.
  */
 const RINGS = {
   catalog: null,
@@ -44,15 +44,6 @@ const RINGS = {
   tiltInfo: null,      // the "tilt" design ring's info (drives the Design area slider)
   current: null,       // { shape, size } on show
   loadToken: 0,        // ignores a slow load that a newer selection has overtaken
-};
-
-// How the band around the flat top meets the design (relief ring only).
-const BAND_MAX_DOWN_NORMAL = -0.5; // band vertices facing further down than this (the finger hole) never move
-const EDGE_SMOOTH_MM = 0.1; // Gaussian sigma of the design's height along the edge: just enough to drop pixel noise
-// The band's cove below the design's edge (see coveProfile). Its steepness is a slider.
-const COVE = {
-  steepness: 3,  // how sharply the cove sweeps up at the edge: 1 = gentle, higher = closer to vertical
-  cut: 1.0,      // how deep the hollow is carved into the band, x the design's edge height
 };
 
 function clamp(v, lo, hi) {
@@ -446,7 +437,7 @@ function setFaceSize(widthMm, heightMm, outline) {
 /**
  * The design area of a "recess" ring (the recessed floor inside a ridge): its
  * vertices are the first region_vertex_count; the design fills it up to the
- * ridge with no band transition, so no vertex has an edge link.
+ * ridge.
  */
 function recessArea(base, info, shift = 0) {
   const n = base.n, pos = base.cur || base.pos;
@@ -460,10 +451,7 @@ function recessArea(base, info, shift = 0) {
   return {
     entry: { width_mm: w, height_mm: h },
     inArea: new Uint8Array(n).fill(1),
-    edgeIdx: new Int32Array(n).fill(-1),
-    edgeDist: new Float32Array(n),
     uv,
-    rim: edgeLoop(pos, []),
   };
 }
 
@@ -517,14 +505,10 @@ function applyRidgeShift(base, info, shift) {
     `${t ? (t - shift).toFixed(2) + " mm thick" : shift.toFixed(2) + " mm out"} · floor ${(info.face_width_mm + 2 * shift).toFixed(2)} × ${(info.face_height_mm + 2 * shift).toFixed(2)} mm`;
 }
 
-/**
- * One-off per load: what computeDesignArea needs about the zone -- each top
- * face's tilt from flat, and the zone's vertex adjacency (with edge lengths)
- * for measuring distances along the surface.
- */
+/** One-off per load: each top face's tilt from flat, for computeDesignArea. */
 function prepareReliefZone(pos, nrm, index) {
   const r = RINGS.relief;
-  const nTop = r.top_face_count, nFaces = r.zone_face_count, n = r.zone_vertex_count;
+  const nTop = r.top_face_count, n = r.zone_vertex_count;
   const faceTilt = new Float32Array(nTop);
   for (let t = 0; t < nTop; t++) {
     const a = 3 * index[3 * t], b = 3 * index[3 * t + 1], c = 3 * index[3 * t + 2];
@@ -533,179 +517,35 @@ function prepareReliefZone(pos, nrm, index) {
     const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     faceTilt[t] = (Math.acos(Math.min(1, Math.max(-1, ny / (Math.hypot(nx, ny, nz) || 1)))) * 180) / Math.PI;
   }
-  // CSR adjacency over the zone's faces (each edge seen from both of its faces;
-  // duplicates are harmless for the distance search)
-  const deg = new Int32Array(n + 1);
-  for (let k = 0; k < 3 * nFaces; k++) deg[index[k] + 1] += 2;
-  for (let i = 0; i < n; i++) deg[i + 1] += deg[i];
-  const nbr = new Int32Array(deg[n]), len = new Float32Array(deg[n]), fill = Int32Array.from(deg.subarray(0, n));
-  for (let t = 0; t < nFaces; t++) {
-    for (let e = 0; e < 3; e++) {
-      const a = index[3 * t + e], b = index[3 * t + ((e + 1) % 3)];
-      const l = Math.hypot(pos[3 * b] - pos[3 * a], pos[3 * b + 1] - pos[3 * a + 1], pos[3 * b + 2] - pos[3 * a + 2]);
-      nbr[fill[a]] = b; len[fill[a]++] = l;
-      nbr[fill[b]] = a; len[fill[b]++] = l;
-    }
-  }
-  return { pos, nrm, index, n, nTop, faceTilt, adjStart: deg, adjNbr: nbr, adjLen: len };
+  return { pos, nrm, index, n, nTop, faceTilt };
 }
 
 /**
- * The design area for a tilt angle, worked out live:
- * 1. area faces = top faces tilting less than `deg`; area vertices = theirs;
- * 2. its edge = edges used by one area face only, walked into an ordered loop;
- * 3. every zone vertex within blend_mm of the edge, measured along the
- *    surface (Dijkstra from all edge points at once), gets the nearest edge
- *    point and the signed distance (negative inside the area);
- * 4. top-down UVs map the tabulated bounding box for that angle (the one the
- *    backend sizes the heightmap to) onto the heightmap.
+ * The design area for a tilt angle: the top faces tilting less than `deg`
+ * and their vertices, with top-down UVs mapping the tabulated bounding box
+ * for that angle (the one the backend sizes the heightmap to) onto the
+ * heightmap. The rest of the ring isn't moved, so the design ends at the
+ * area's edge with a hard edge.
  */
 function computeDesignArea(base, deg) {
-  const r = RINGS.relief;
-  const { pos, nrm, index, n, nTop, faceTilt } = base;
+  const { pos, index, n, nTop, faceTilt } = base;
   const entry = tiltEntry(deg);
-
-  // 1-2. area and its edge
   const inArea = new Uint8Array(n);
-  const edgeCount = new Map();
   for (let t = 0; t < nTop; t++) {
     if (faceTilt[t] >= deg) continue;
-    for (let e = 0; e < 3; e++) {
-      const a = index[3 * t + e], b = index[3 * t + ((e + 1) % 3)];
-      inArea[a] = 1;
-      const key = a < b ? a * n + b : b * n + a;
-      edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
-    }
+    inArea[index[3 * t]] = inArea[index[3 * t + 1]] = inArea[index[3 * t + 2]] = 1;
   }
-  const links = new Map();
-  for (const [key, c] of edgeCount) {
-    if (c !== 1) continue;
-    const a = Math.floor(key / n), b = key % n;
-    if (!links.has(a)) links.set(a, []);
-    if (!links.has(b)) links.set(b, []);
-    links.get(a).push(b);
-    links.get(b).push(a);
-  }
-  let loop = [];
-  const seen = new Set();
-  for (const start of links.keys()) {
-    if (seen.has(start)) continue;
-    const cur = [start];
-    seen.add(start);
-    let prev = -1, at = start;
-    for (;;) {
-      const next = links.get(at).find((x) => x !== prev && (!seen.has(x) || x === start));
-      if (next === undefined || next === start) break;
-      prev = at; at = next;
-      cur.push(at);
-      seen.add(at);
-    }
-    if (cur.length > loop.length) loop = cur;
-  }
-
-  // 3. nearest edge point + distance along the surface
-  const dist = new Float64Array(n).fill(Infinity); // 64-bit, like the keys compared against it
-  const from = new Int32Array(n).fill(-1);
-  const heap = new MinHeap();
-  loop.forEach((vi, k) => { dist[vi] = 0; from[vi] = k; heap.push(0, vi); });
-  const cap = Math.max(r.blend_mm, r.inner_mm);
-  while (heap.size) {
-    const [d, v] = heap.pop();
-    if (d > dist[v]) continue;
-    for (let k = base.adjStart[v]; k < base.adjStart[v + 1]; k++) {
-      const w = base.adjNbr[k], nd = d + base.adjLen[k];
-      if (nd < dist[w] && nd <= cap) { dist[w] = nd; from[w] = from[v]; heap.push(nd, w); }
-    }
-  }
-  const edgeIdx = new Int32Array(n).fill(-1), edgeDist = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    if (from[i] < 0) continue;
-    if (inArea[i]) {
-      if (dist[i] < r.inner_mm) { edgeIdx[i] = from[i]; edgeDist[i] = -dist[i]; }
-    } else if (dist[i] < r.blend_mm && nrm[3 * i + 1] > BAND_MAX_DOWN_NORMAL) {
-      edgeIdx[i] = from[i]; edgeDist[i] = dist[i];
-    }
-  }
-
-  // 4. top-down UVs over the tabulated box
   const uv = new Float32Array(2 * n);
   for (let i = 0; i < n; i++) {
     uv[2 * i] = (pos[3 * i] - entry.x0) / entry.width_mm;
     uv[2 * i + 1] = (pos[3 * i + 2] - entry.z0) / entry.height_mm;
   }
-  return { deg: entry.deg, entry, inArea, edgeIdx, edgeDist, uv, rim: edgeLoop(pos, loop) };
+  return { deg: entry.deg, entry, inArea, uv };
 }
 
 /** The tilt design ring's tabulated design area (tilt_table) nearest to an angle. */
 function tiltEntry(deg) {
   return RINGS.tiltInfo.tilt_table.reduce((best, e) => (Math.abs(e.deg - deg) < Math.abs(best.deg - deg) ? e : best));
-}
-
-/** Binary min-heap of (key, value) pairs, for the distance search. */
-class MinHeap {
-  constructor() { this.k = []; this.v = []; }
-  get size() { return this.k.length; }
-  push(key, val) {
-    const k = this.k, v = this.v;
-    let i = k.length;
-    k.push(key); v.push(val);
-    while (i > 0) {
-      const p = (i - 1) >> 1;
-      if (k[p] <= key) break;
-      k[i] = k[p]; v[i] = v[p]; i = p;
-    }
-    k[i] = key; v[i] = val;
-  }
-  pop() {
-    const k = this.k, v = this.v;
-    const top = [k[0], v[0]];
-    const lk = k.pop(), lv = v.pop();
-    if (k.length) {
-      let i = 0;
-      for (;;) {
-        const l = 2 * i + 1, r = l + 1;
-        let m = i, mk = lk;
-        if (l < k.length && k[l] < mk) { m = l; mk = k[l]; }
-        if (r < k.length && k[r] < mk) { m = r; mk = k[r]; }
-        if (m === i) break;
-        k[i] = k[m]; v[i] = v[m]; i = m;
-      }
-      k[i] = lk; v[i] = lv;
-    }
-    return top;
-  }
-}
-
-/**
- * The flat top's edge loop (vertex indices, in order) plus a Gaussian
- * smoothing kernel along it by arc length, so the band can follow a smoothed
- * version of the design's height at the edge.
- */
-function edgeLoop(pos, idx) {
-  const n = idx.length;
-  const seg = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const a = 3 * idx[i], b = 3 * idx[(i + 1) % n];
-    seg[i] = Math.hypot(pos[b] - pos[a], pos[b + 1] - pos[a + 1], pos[b + 2] - pos[a + 2]);
-  }
-  const kStart = [0], kIdx = [], kW = [];
-  for (let i = 0; i < n; i++) {
-    const ids = [i], w = [1];
-    for (const dir of [1, -1]) {
-      let s = 0;
-      for (let k = 1; k < n / 2; k++) {
-        const j = (i + dir * k + n) % n;
-        s += dir > 0 ? seg[(j - 1 + n) % n] : seg[j];
-        if (s > 3 * EDGE_SMOOTH_MM) break;
-        ids.push(j);
-        w.push(Math.exp(-0.5 * (s / EDGE_SMOOTH_MM) ** 2));
-      }
-    }
-    const total = w.reduce((a, b) => a + b, 0);
-    for (let k = 0; k < ids.length; k++) { kIdx.push(ids[k]); kW.push(w[k] / total); }
-    kStart.push(kIdx.length);
-  }
-  return { idx: Int32Array.from(idx), kStart: Int32Array.from(kStart), kIdx: Int32Array.from(kIdx), kW: Float32Array.from(kW) };
 }
 
 /** Volume (mm^3) of a closed triangle mesh: the sum of signed tetrahedra to the origin. */
@@ -862,23 +702,13 @@ function boxBlur(src, w, h, r) {
 }
 
 /**
- * Apply the heightmap to the relief ring, with the band around the design
- * area curving up to meet it (the area and edge distances come from
- * computeDesignArea):
+ * Apply the heightmap to the relief ring (the design area comes from
+ * computeDesignArea / recessArea):
  *
- * 1. The design's height is read at every point on the area's edge and
- *    smoothed along the edge (EDGE_SMOOTH_MM), giving the height the band
- *    has to reach -- its broad shape, not every fine detail.
- * 2. Area vertices are pushed out along their normal (straight up) by the
- *    heightmap at their top-down UV. Within inner_mm of the edge the design
- *    eases into that smoothed edge height, so the two meet exactly.
- * 3. Band vertices (rounded edge and upper shoulders) move along their own
- *    normal by the edge height at their nearest edge point times
- *    coveProfile: a concave cove, carved into the band, that sweeps up to
- *    meet the design's edge. Where the design has no height at the edge the
- *    band doesn't move.
- *
- * 4. On a "recess" ring (the design fills the floor inside a ridge) the floor
+ * 1. Design-area vertices are pushed out along their normal (straight up) by
+ *    the heightmap at their top-down UV. Nothing outside the area moves, so
+ *    the design ends at the area's edge with a hard edge.
+ * 2. On a "recess" ring (the design fills the floor inside a ridge) the floor
  *    moves straight up/down instead, lifted so the design's highest point is
  *    level with the top of the ridge's inner wall, and the wall stretches so
  *    its foot follows the floor edge below it and its top stays at the ridge.
@@ -895,12 +725,11 @@ function displaceFace() {
   // ...and the design's highest point always sits level with the top of the
   // ridge's inner wall, at any exaggeration (which only deepens what's below it)
   const recessLift = vertical ? RINGS.relief.wall_top_y_mm - RINGS.relief.floor_y_mm : 0;
-  const { inArea, edgeIdx, edgeDist, uv, rim, entry } = area;
+  const { inArea, uv, entry } = area;
   const src = state.previewCanvas;
   const w = src.width, h = src.height;
   const { data } = src.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, w, h);
   const reliefMax = state.cfg.relief_max_mm, exag = state.exaggeration;
-  const blendMm = RINGS.relief.blend_mm || 1, innerMm = RINGS.relief.inner_mm || 1; // (recess rings have no band)
 
   const raw = new Float32Array(w * h);
   let top = 0; // the design's highest point
@@ -908,22 +737,10 @@ function displaceFace() {
   const blurred = boxBlur(raw, w, h, Math.max(1, Math.round((PATINA.radiusMm / entry.width_mm) * w)));
   // The preview exaggeration grows the design downwards: its highest point
   // stays at its true height and everything below it sinks `exag` times
-  // deeper (at 1x this is just the true height).
-  const displaceMm = (height) => reliefMax * (top + (height - top) * exag);
-
-  // 1. design height along the edge, smoothed
-  const nRim = rim.idx.length;
-  const rawEdge = new Float32Array(nRim);
-  for (let r = 0; r < nRim; r++) {
-    const vi = rim.idx[r];
-    rawEdge[r] = sampleBilinear(raw, w, h, uv[2 * vi], uv[2 * vi + 1]);
-  }
-  const edgeH = new Float32Array(nRim);
-  for (let r = 0; r < nRim; r++) {
-    let s = 0;
-    for (let k = rim.kStart[r]; k < rim.kStart[r + 1]; k++) s += rim.kW[k] * rawEdge[rim.kIdx[k]];
-    edgeH[r] = s;
-  }
+  // deeper (at 1x this is just the true height). With "exaggerate upward"
+  // the base stays put instead and the peaks rise `exag` times higher.
+  const anchor = state.exaggerateUp ? 0 : top;
+  const displaceMm = (height) => reliefMax * (anchor + (height - anchor) * exag);
 
   const geo = state.reliefMesh.geometry;
   const pos = geo.attributes.position;
@@ -932,26 +749,14 @@ function displaceFace() {
   const truePos = Float32Array.from(basePos);
   const displace1 = (height) => reliefMax * height;
   for (let i = 0; i < n; i++) {
-    const r = edgeIdx[i], dist = edgeDist[i];
     let d = 0, d1 = 0, shade = 1;
     if (inArea[i]) {
-      // 2. design area
       const u = uv[2 * i], v = uv[2 * i + 1];
-      let height = sampleBilinear(raw, w, h, u, v);
+      const height = sampleBilinear(raw, w, h, u, v);
       const cavity = Math.max(0, sampleBilinear(blurred, w, h, u, v) - height);
-      let t = 1;
-      if (r >= 0) {
-        t = smoothstep(-dist / innerMm);
-        height = edgeH[r] + (height - edgeH[r]) * t;
-      }
-      shade = 1 - PATINA.darkness * smoothstep(cavity * PATINA.strength) * t;
-      d = vertical ? recessLift + reliefMax * (height - top) * exag : displaceMm(height);
+      shade = 1 - PATINA.darkness * smoothstep(cavity * PATINA.strength);
+      d = vertical ? recessLift + reliefMax * (anchor + (height - anchor) * exag - top) : displaceMm(height);
       d1 = vertical ? recessLift + reliefMax * (height - top) : displace1(height);
-    } else if (r >= 0) {
-      // 3. band: the cove meets the design's (displaced) edge
-      const cove = coveProfile(dist / blendMm);
-      d = displaceMm(edgeH[r]) * cove;
-      d1 = displace1(edgeH[r]) * cove;
     }
     if (vertical) {
       pos.setXYZ(i, basePos[3 * i], basePos[3 * i + 1] + d, basePos[3 * i + 2]);
@@ -962,7 +767,7 @@ function displaceFace() {
     }
     col.setXYZ(i, shade, shade, shade);
   }
-  // 4. recess rings: stretch the ridge's inner wall so its foot follows the
+  // 2. recess rings: stretch the ridge's inner wall so its foot follows the
   // floor edge below it (down where the design sinks it, up where it rises)
   // while its top at the ridge stays put
   if (vertical && wall) {
@@ -980,24 +785,6 @@ function displaceFace() {
   col.needsUpdate = true;
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
-}
-
-/**
- * The cove's shape down the band, as a multiple of the design's edge height,
- * at t = distance from the edge / blend_mm (0 at the edge, 1 at the far side):
- *
- *   (1 - t)^p  -  cut * 6.75 * t * (1 - t)^2
- *
- * The first term rises to meet the design at the edge (1 at t = 0), more
- * sharply the larger p (COVE.steepness); the second carves a hollow into the
- * band, deepest (cut) at t = 1/3. Going up from the band the surface dips into
- * that hollow and then sweeps up concavely to the edge. Both terms and their
- * slopes are 0 at t = 1, so the cove blends smoothly into the untouched band.
- */
-function coveProfile(t) {
-  if (t >= 1) return 0;
-  const s = 1 - t;
-  return Math.pow(s, COVE.steepness) - COVE.cut * 6.75 * t * s * s;
 }
 
 function updateMeshHeights() {
@@ -1405,17 +1192,14 @@ function wireUI(cfg) {
   };
   ridge.addEventListener("input", () => onRidge(false));
   ridge.addEventListener("change", () => onRidge(true));
-  const cove = document.getElementById("coveSteepness");
-  cove.value = COVE.steepness;
-  wireSliderDisplay("coveSteepness");
-  cove.addEventListener("input", () => {
-    COVE.steepness = parseFloat(cove.value);
-    if (!tiltFrame) tiltFrame = requestAnimationFrame(() => { tiltFrame = 0; updateMeshHeights(); });
-  });
 
   wireSliderDisplay("exaggeration", "x");
   document.getElementById("exaggeration").addEventListener("input", (e) => {
     state.exaggeration = parseFloat(e.target.value);
+    updateMeshHeights();
+  });
+  document.getElementById("exaggerateUp").addEventListener("change", (e) => {
+    state.exaggerateUp = e.target.checked;
     updateMeshHeights();
   });
 

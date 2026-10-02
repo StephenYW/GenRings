@@ -143,42 +143,22 @@ relief ring.
 So the viewer can change the angle without a rebuild, the script prepares everything any
 angle up to `TILT_MAX_DEG` (30°) could need:
 
-- the "zone" — the top faces up to 30° plus the band around them (the rounded edge and
-  upper shoulders, within `BLEND_MM` = 2.5mm, not facing down, so the finger hole is left
-  alone) — refined twice (each pass splits every triangle in four, down to ~0.04mm edges),
-  splitting the neighbouring triangles to match so there are no cracks. In the GLB the
-  top faces come first, then the band's, and the zone's vertices come first;
+- the "zone" — the top faces up to 30° — refined twice (each pass splits every triangle
+  in four, down to ~0.04mm edges), splitting the neighbouring triangles to match so there
+  are no cracks. In the GLB the zone's faces and vertices come first;
 - `relief.json`'s `tilt_table`: for every 0.5°, the area's bounding box seen from above
   and its outline. The backend sizes the heightmap from it (`face_tilt_deg` on
   `/api/process`, `config.face_geometry`), and the viewer maps its top-down UVs onto the
   same box (u along X, v along Z, image row 0 at -Z).
 
-When the slider moves, the viewer (`computeDesignArea` in `static/main.js`, about 0.1s)
-takes the top faces tilting less than the angle as the design area, traces its edge into
-an ordered loop, and measures every nearby vertex's distance to that edge along the
-surface (Dijkstra from all edge points at once). On release, it asks the backend for a
-heightmap of the new size; while dragging, the current heightmap is stretched to the new
+When the slider moves, the viewer (`computeDesignArea` in `static/main.js`) takes the top
+faces tilting less than the angle as the design area. On release, it asks the backend for
+a heightmap of the new size; while dragging, the current heightmap is stretched to the new
 area.
 
-So the design doesn't start abruptly at the area's edge, the band around it curves up to
-meet it. The viewer (`displaceFace` in `static/main.js`) then, on every update:
-
-1. reads the design's height at every point on the area's edge, smoothed only slightly
-   along the edge (`EDGE_SMOOTH_MM` = 0.1mm, just to drop pixel noise), so the band
-   follows the design's detail;
-2. pushes each design-area vertex out along its normal (straight up) by the heightmap,
-   easing into that smoothed edge height over the last `INNER_MM` (0.3mm), so the two
-   meet exactly;
-3. moves each band vertex along its own normal by the edge height at its nearest edge
-   point times `coveProfile(t)`, with t = distance from the edge / `BLEND_MM`:
-   `(1 - t)^p - cut * 6.75 * t * (1 - t)^2`. That is a concave cove: going up from the
-   band, the surface dips into a hollow carved into the band (deepest, `COVE.cut` x the
-   edge height, a third of the way down) and then sweeps up to meet the design's edge,
-   more sharply the larger `p` — the **Edge cove steepness** slider (1–8, default 3).
-   Everything is 0 with zero slope `BLEND_MM` down, so it blends into the untouched ring.
-
-Because the cove scales with the design's height at the edge, there is no cove where
-the design has no height there: the band stays exactly as it is. Other rings show without a design, and the menu says so.
+The viewer (`displaceFace`) pushes each design-area vertex out along its normal (straight
+up) by the heightmap. Nothing outside the area moves: the rounded edge and band stay
+exactly as the source ring, and the design ends at the area's edge with a hard edge. Other rings show without a design, and the menu says so.
 The STL export is still the plain rectangular relief slab.
 
 ## How it works
@@ -370,7 +350,7 @@ processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `mod
   `SILVER_DENSITY_G_CM3` = 10.37 g/cm³ in `app/config.py`). The viewer computes it from the
   volume of the ring on show (its mesh is watertight; signed-tetrahedron sum,
   `meshVolume` in `static/main.js`) with the design applied at its true height — whatever
-  the preview exaggeration — including the cove on Square and the raised floor and moved
+  the preview exaggeration — including the raised floor and moved
   ridge wall on Square (ridged). E.g. S Square with a small emblem is about 17.95 g. The
   report also still gives the relief's own volume and weight (same density).
 
