@@ -177,6 +177,17 @@ def fal_price_usd(model: str, mp: float = 1.0) -> float:
     return 0.04                                            # unknown model: a cautious estimate
 
 
+_KONTEXT_ASPECTS = ["21:9", "16:9", "4:3", "3:2", "1:1", "2:3", "3:4", "9:16", "9:21"]
+
+
+def _nearest_aspect(w: int, h: int) -> str:
+    """The FLUX Kontext [pro] aspect ratio closest to w:h (compared on a log scale)."""
+    def ratio(a):
+        x, y = a.split(":")
+        return float(x) / float(y)
+    return min(_KONTEXT_ASPECTS, key=lambda a: abs(math.log(ratio(a)) - math.log(w / h)))
+
+
 class FalRelief:
     """Image editing on fal.ai (synchronous endpoint, one image per call)."""
     name = "fal"
@@ -215,6 +226,9 @@ class FalRelief:
             body["negative_prompt"] = negative
         if "flux-pro/kontext" in model:
             body["safety_tolerance"] = "2"
+            body["aspect_ratio"] = _nearest_aspect(w, h)   # the closest it offers; cropped exactly afterwards
+        if "flux-kontext/dev" in model:
+            body["resolution_mode"] = "match_input"
         if "qwen" in model or "flux-2" in model:
             body["image_size"] = {"width": w - w % 16, "height": h - h % 16}  # keep the source's shape
         return body

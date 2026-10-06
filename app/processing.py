@@ -28,6 +28,7 @@ class ProcessParams:
     edge_margin_mm: float = config.EDGE_MARGIN_MM
     edge_feather_mm: float = config.EDGE_FEATHER_MM
     subject_base: float = config.SUBJECT_BASE_LEVEL  # with a subject mask: the subject's lowest level
+    background_texture: str | None = None  # with a subject mask: a texture id (app/textures.py) for the background
     # Image enhancement (all off by default here; see process_image for the order they run in)
     denoise: bool = False           # edge-preserving cleanup of the source before anything else
     bas_relief: float = 0.0         # 0..1: squash large height differences, keep fine detail
@@ -97,17 +98,23 @@ def normalize(gray: np.ndarray) -> np.ndarray:
     return np.clip((gray - lo) / (hi - lo), 0.0, 1.0)
 
 
-def apply_subject_mask(gray: np.ndarray, mask01: np.ndarray, base: float) -> np.ndarray:
+def apply_subject_mask(gray: np.ndarray, mask01: np.ndarray, base: float,
+                       background: np.ndarray | None = None,
+                       background_height: float = config.BACKGROUND_TEXTURE_HEIGHT) -> np.ndarray:
     """Keep only the subject (mask01: 1 = subject, 0 = background, soft at the
     edges): the background becomes flat 0, and the subject's own tones are
     re-stretched to fill base..1, so it stands on a raised plateau with its
-    full range of detail. An empty mask leaves a blank image."""
+    full range of detail. With a `background` texture (0..1, same shape) the
+    background is that pattern raised by `background_height` -- flat apart
+    from that, with no shading from the subject. An empty mask leaves just the
+    background."""
+    bg = np.zeros_like(gray) if background is None else background_height * np.clip(background, 0.0, 1.0)
     inside = mask01 > 0.5
     if not inside.any():
-        return np.zeros_like(gray)
+        return bg.astype(np.float32)
     lo, hi = float(gray[inside].min()), float(gray[inside].max())
     g = np.clip((gray - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
-    return (mask01 * (base + (1.0 - base) * g)).astype(np.float32)
+    return (mask01 * (base + (1.0 - base) * g) + (1.0 - mask01) * bg).astype(np.float32)
 
 
 # --- image enhancement ---------------------------------------------------------
@@ -475,7 +482,11 @@ def process_image(
     mask01 = None
     if subject_mask is not None:
         mask01 = cv2.resize(subject_mask.astype(np.float32), (gray.shape[1], gray.shape[0]), interpolation=cv2.INTER_AREA)
-        gray = apply_subject_mask(gray, mask01, params.subject_base)
+        background = None
+        if params.background_texture:
+            from app import textures
+            background = textures.texture_map(params.background_texture, gray.shape[1], gray.shape[0])
+        gray = apply_subject_mask(gray, mask01, params.subject_base, background)
     if params.outline_strength > 0:
         gray = engrave(gray, xdog_lines(lum), params.outline_strength)
     if params.hatch_strength > 0:

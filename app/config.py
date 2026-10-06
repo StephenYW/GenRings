@@ -85,6 +85,10 @@ BG_REMOVAL_MODEL = os.getenv("BG_REMOVAL_MODEL", "isnet-general-use")
 # lowest point is this fraction of the full relief height above the
 # (flat, zero) background, so its silhouette always reads.
 SUBJECT_BASE_LEVEL = 0.2
+# A background texture (static/textures/, see app/textures.py) is raised this
+# fraction of the relief height off the flat background -- below the subject's
+# lowest level, so the subject always sits on top of it.
+BACKGROUND_TEXTURE_HEIGHT = 0.12
 
 # --- Image enhancement (app/enhance.py, app/processing.py) -------------------
 DEPTH_INPUT_PX = 518            # depth model's working size (long side, multiple of 14)

@@ -838,18 +838,6 @@ async function fetchConfig() {
   return res.json();
 }
 
-async function generateCandidates(prompt, preset) {
-  // Backend always generates exactly one image per call (each call is a
-  // real, billed API request) -- click "Generate" again to add another.
-  const res = await fetch("/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, preset }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
 async function uploadPhoto(file) {
   const formData = new FormData();
   formData.append("file", file);
@@ -1098,21 +1086,9 @@ function wireSliderDisplay(id, suffix = "") {
   update();
 }
 
-function populatePresets(cfg) {
-  const select = document.getElementById("preset");
-  select.innerHTML = "";
-  for (const [id, p] of Object.entries(cfg.presets)) {
-    const opt = document.createElement("option");
-    opt.value = id;
-    opt.textContent = p.label;
-    if (id === cfg.default_preset) opt.selected = true;
-    select.appendChild(opt);
-  }
-}
-
+/** Processing defaults for a newly selected image (the default preset's levels/blur). */
 function applyPresetDefaults(cfg) {
-  const presetId = document.getElementById("preset").value;
-  const p = cfg.presets[presetId];
+  const p = cfg.presets[cfg.default_preset];
   if (!p) return;
   document.getElementById("levels").value = p.levels;
   document.getElementById("blur").value = p.blur_mm;
@@ -1136,7 +1112,7 @@ function renderGallery(candidates) {
 // Design with AI: re-sculpt the selected image as a relief (POST /api/relief)
 // ---------------------------------------------------------------------------
 
-const AI = { options: null, style: null, additions: [], busy: false };
+const AI = { options: null, style: null, imageType: null, additions: [], busy: false };
 
 async function initAI() {
   try {
@@ -1146,6 +1122,7 @@ async function initAI() {
     return;
   }
   AI.style = AI.options.default_style;
+  AI.imageType = AI.options.default_image_type;
   const fid = document.getElementById("aiFidelity");
   fid.value = AI.options.fidelity_default;
   const showFid = () => {
@@ -1163,6 +1140,15 @@ async function initAI() {
     b.dataset.id = st.id;
     b.addEventListener("click", () => { AI.style = st.id; renderAIChoices(); });
     styles.appendChild(b);
+  }
+  const types = document.getElementById("aiTypes");
+  for (const t of AI.options.image_types) {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.textContent = t.label;
+    b.dataset.id = t.id;
+    b.addEventListener("click", () => { AI.imageType = t.id; renderAIChoices(); });
+    types.appendChild(b);
   }
   const strip = document.getElementById("aiAdditions");
   for (const a of AI.options.additions) {
@@ -1204,6 +1190,7 @@ function toggleAddition(id) {
 function renderAIChoices() {
   if (!AI.options) return;
   document.querySelectorAll("#aiStyles .chip").forEach((b) => b.classList.toggle("on", b.dataset.id === AI.style));
+  document.querySelectorAll("#aiTypes .chip").forEach((b) => b.classList.toggle("on", b.dataset.id === AI.imageType));
   document.querySelectorAll("#aiAdditions .addition-card").forEach((c) => c.classList.toggle("on", AI.additions.includes(c.dataset.id)));
   const chips = document.getElementById("aiChips");
   chips.innerHTML = "";
@@ -1212,6 +1199,12 @@ function renderAIChoices() {
   st.className = "tag style";
   st.textContent = style.label;
   chips.appendChild(st);
+  if (AI.imageType !== AI.options.default_image_type) {
+    const ty = document.createElement("span");
+    ty.className = "tag style";
+    ty.textContent = AI.options.image_types.find((t) => t.id === AI.imageType).label;
+    chips.appendChild(ty);
+  }
   for (const id of AI.additions) {
     const a = AI.options.additions.find((x) => x.id === id);
     const tag = document.createElement("span");
@@ -1248,7 +1241,9 @@ async function generateRelief() {
   const text = textEl.value.trim();
   const style = AI.options.styles.find((s) => s.id === AI.style).label;
   const extras = AI.additions.map((id) => AI.options.additions.find((a) => a.id === id).label);
-  addChatMessage(`You: ${[style, ...extras].join(" + ")}${text ? " — “" + text + "”" : ""}`, "you");
+  const kind = AI.imageType !== AI.options.default_image_type
+    ? [AI.options.image_types.find((t) => t.id === AI.imageType).label] : [];
+  addChatMessage(`You: ${[style, ...kind, ...extras].join(" + ")}${text ? " — “" + text + "”" : ""}`, "you");
   AI.busy = true;
   renderAIChoices();
   setStatus("aiStatus", "Sculpting your relief… this takes a few seconds per image.");
@@ -1256,7 +1251,8 @@ async function generateRelief() {
     const res = await fetch("/api/relief", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source_id: state.selectedCandidateId, style: AI.style, additions: AI.additions, text,
+      body: JSON.stringify({ source_id: state.selectedCandidateId, style: AI.style, image_type: AI.imageType,
+                             additions: AI.additions, text,
                              fidelity: parseFloat(document.getElementById("aiFidelity").value) }),
     });
     if (!res.ok) {
@@ -1265,7 +1261,7 @@ async function generateRelief() {
       throw new Error(msg);
     }
     const out = await res.json();
-    addChatMessage(`${out.candidates.length === 1 ? "1 relief" : out.candidates.length + " reliefs"} added below — the first is on the ring.`, "ai");
+    addChatMessage(`${out.candidates.length === 1 ? "1 image" : out.candidates.length + " images"} added below (made from your original) — the first is on the ring.`, "ai");
     textEl.value = "";
     renderUsage(out.usage);
     state.candidates = [...state.candidates, ...out.candidates];
@@ -1324,7 +1320,6 @@ async function selectCandidate(candidateId, imgEl) {
 }
 
 function wireUI(cfg) {
-  populatePresets(cfg);
   wireCropDrag();
 
   document.getElementById("cropZoom").addEventListener("input", (e) => {
@@ -1386,52 +1381,19 @@ function wireUI(cfg) {
   document.getElementById("photoUploadInput").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setStatus("generateStatus", "Uploading photo...");
+    setStatus("uploadStatus", "Uploading photo...");
     try {
       const candidate = await uploadPhoto(file);
       state.candidates = [...state.candidates, candidate];
       renderGallery(state.candidates);
       const newImg = document.querySelector(`#gallery img[data-candidate-id="${candidate.candidate_id}"]`);
       selectCandidate(candidate.candidate_id, newImg);
-      setStatus("generateStatus", "Photo uploaded and selected below.");
+      setStatus("uploadStatus", "Photo uploaded and selected below.");
     } catch (err) {
       console.error(err);
-      setStatus("generateStatus", "Upload failed: " + err.message, true);
+      setStatus("uploadStatus", "Upload failed: " + err.message, true);
     } finally {
       e.target.value = "";
-    }
-  });
-
-  document.getElementById("generateBtn").addEventListener("click", async () => {
-    const prompt = document.getElementById("prompt").value.trim();
-    if (!prompt) {
-      setStatus("generateStatus", "Enter a description first.", true);
-      return;
-    }
-    const preset = document.getElementById("preset").value;
-    const btn = document.getElementById("generateBtn");
-    btn.disabled = true;
-    setStatus("generateStatus", "Generating 1 image...");
-    try {
-      const result = await generateCandidates(prompt, preset);
-      // Each click generates exactly one image (one billed API call) and
-      // adds it to the gallery -- click again to add more for comparison.
-      state.candidates = [...state.candidates, ...result.candidates];
-      renderGallery(state.candidates);
-      setStatus("generateStatus", "Image added below. Click Generate again for another, or pick one to preview.");
-      if (result.warnings && result.warnings.length) {
-        setStatus("generateStatus", result.warnings.join(" "));
-      }
-      if (result.candidates.length) {
-        const newCandidate = result.candidates[0];
-        const newImg = document.querySelector(`#gallery img[data-candidate-id="${newCandidate.candidate_id}"]`);
-        selectCandidate(newCandidate.candidate_id, newImg);
-      }
-    } catch (err) {
-      console.error(err);
-      setStatus("generateStatus", "Generation failed: " + err.message, true);
-    } finally {
-      btn.disabled = false;
     }
   });
 }

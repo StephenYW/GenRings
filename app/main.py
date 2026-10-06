@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from app import background, config, enhance, prompts, relief, relief_prompts, storage
+from app import background, config, enhance, prompts, relief, relief_prompts, storage, textures
 from app.imaging import cap_max_dimension, cover_fit_resize
 from app.processing import ProcessParams, process_image
 from app.providers import get_provider
@@ -45,8 +45,9 @@ class GenerateResponse(BaseModel):
 
 
 class ReliefRequest(BaseModel):
-    source_id: str                                   # the candidate to re-render (an upload or an earlier result)
+    source_id: str                                   # the selected candidate; results always come from its original upload
     style: str = relief_prompts.DEFAULT_STYLE
+    image_type: str = relief_prompts.DEFAULT_IMAGE_TYPE  # portrait, animal, landscape, painting, ...
     additions: list[str] = []                        # ids from relief_prompts.ADDITIONS, in the order picked
     text: str = Field(default="", max_length=500)    # the user's own request; if given, 4 variations are made
     fidelity: float = Field(default=config.RELIEF_FIDELITY_DEFAULT, ge=0.0, le=1.0)
@@ -239,31 +240,58 @@ def generate_relief(req: ReliefRequest):
     Each result is stored as a new candidate, so every slider and the 3D
     preview work on it; its meta records how it was made and what it cost.
     """
-    src = storage.design_dir(req.source_id) / "candidate_full.png"
-    if not src.exists():
+    if not (storage.design_dir(req.source_id) / "candidate_full.png").exists():
         raise HTTPException(404, f"Unknown candidate '{req.source_id}'")
     if req.style not in relief_prompts.STYLES:
         raise HTTPException(400, f"Unknown style '{req.style}'")
+    if req.image_type not in relief_prompts.IMAGE_TYPES:
+        raise HTTPException(400, f"Unknown image type '{req.image_type}'")
+    # Always work from the original image: re-generating from a result drifts
+    # further from the original each time.
+    origin_id = _original_of(req.source_id)
+    src = storage.design_dir(origin_id) / "candidate_full.png"
     rgb = cv2.cvtColor(cv2.imread(str(src), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
     n = config.RELIEF_IMAGES_WITH_TEXT if req.text.strip() else config.RELIEF_IMAGES_DEFAULT
     try:
         provider = relief.get_relief_provider()
         prompt, negative = relief_prompts.build_relief_prompt(
-            req.style, req.additions, req.text, instruction=provider.instruction, fidelity=req.fidelity)
+            req.style, req.additions, req.text, instruction=provider.instruction, fidelity=req.fidelity,
+            image_type=req.image_type)
         images = relief.generate_many(provider, rgb, prompt, negative, req.fidelity, n)
     except relief.ReliefError as err:
         raise HTTPException(502, str(err))
 
     request_id = uuid.uuid4().hex
     out = []
+    h0, w0 = rgb.shape[:2]
+    bg_choice = relief_prompts.background_choice(req.additions)
     for img in images:
-        full = cap_max_dimension(img.rgb, config.MAX_FULL_IMAGE_DIM_PX)
+        # the original's exact aspect ratio (models snap to their own sizes),
+        # at the result's own resolution
+        h, w = img.rgb.shape[:2]
+        scale = min(w / w0, h / h0)
+        same_shape = cover_fit_resize(img.rgb, max(1, round(w0 * scale)), max(1, round(h0 * scale)))
+        full = cap_max_dimension(same_shape, config.MAX_FULL_IMAGE_DIM_PX)
         design_id, d = storage.new_design_dir()
+        if bg_choice:
+            # The model drew the subject on a plain background: cut it out and
+            # build the background here -- flat, shadow-free, with the chosen
+            # texture (raised slightly in the heightmap, see /api/process).
+            try:
+                mask = background.subject_mask(full)
+            except background.BackgroundRemovalUnavailable as err:
+                raise HTTPException(503, str(err))
+            cv2.imwrite(str(d / "subject_mask.png"), mask)
+            m = (mask.astype(np.float32) / 255.0)[..., None]
+            flat = textures.flat_preview(bg_choice.texture, full.shape[1], full.shape[0])
+            full = np.clip(full * m + flat * (1 - m), 0, 255).astype(np.uint8)
         storage.save_rgb_png(d / "candidate_full.png", full)
         storage.save_rgb_png(d / "thumbnail.png", storage.make_thumbnail(full))
         storage.write_json(d / "meta.json", {
-            "design_id": design_id, "source": "relief", "parent": req.source_id, "request_id": request_id,
-            "prompt": req.text, "style": req.style, "additions": req.additions, "fidelity": req.fidelity,
+            "design_id": design_id, "source": "relief", "parent": origin_id, "request_id": request_id,
+            "prompt": req.text, "style": req.style, "image_type": req.image_type, "additions": req.additions,
+            "fidelity": req.fidelity,
+            "background": {"choice": bg_choice.id, "texture": bg_choice.texture} if bg_choice else None,
             "full_prompt": prompt, "negative_prompt": negative, "seed": img.seed,
             "provider": provider.name, "model": img.model,
             "credits": img.credits, "usd": img.usd, "preset": None,
@@ -271,6 +299,23 @@ def generate_relief(req: ReliefRequest):
         relief.log_usage(provider.name, img, design_id, request_id)
         out.append(CandidateOut(candidate_id=design_id, thumbnail_url=f"/api/designs/{design_id}/thumbnail.png"))
     return ReliefResponse(request_id=request_id, prompt=prompt, candidates=out, usage=relief.usage_summary(provider))
+
+
+def _original_of(design_id: str) -> str:
+    """The upload (or text-generated image) a candidate ultimately came from:
+    follows AI results' `parent` links back to the start."""
+    seen = set()
+    while design_id not in seen:
+        seen.add(design_id)
+        try:
+            meta = storage.read_json(storage.design_dir(design_id) / "meta.json")
+        except (OSError, ValueError, HTTPException):
+            break
+        parent = meta.get("parent") if meta.get("source") == "relief" else None
+        if not parent or not (storage.design_dir(parent) / "candidate_full.png").exists():
+            break
+        design_id = parent
+    return design_id
 
 
 @app.get("/api/usage")
@@ -359,8 +404,11 @@ def process(req: ProcessRequest):
         offset_y=req.crop_offset_y,
     )
 
+    # AI designs made with a background option have their subject mask saved
+    # and a background texture to lay behind it (flat, raised slightly)
+    bg_meta = meta.get("background") or {}
     mask = None
-    if req.remove_background:
+    if req.remove_background or bg_meta:
         try:
             mask_full = background.cached_subject_mask(d, full_rgb)
         except background.BackgroundRemovalUnavailable as err:
@@ -386,6 +434,7 @@ def process(req: ProcessRequest):
         levels=req.levels,
         min_feature_mm=req.min_feature_mm,
         relief_height_mm=req.relief_height_mm,
+        background_texture=bg_meta.get("texture"),
         denoise=req.denoise,
         bas_relief=req.bas_relief,
         depth_detail=req.depth_detail,

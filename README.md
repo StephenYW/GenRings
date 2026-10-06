@@ -258,34 +258,71 @@ the background stays flat.) Swap in
 
 ### Design with AI (relief generation)
 
-Once an image is selected, the **Design with AI** section re-sculpts it as a polished silver
-bas-relief with Stable Diffusion, staying close to the original by default:
+This is the app's only image generator. Once an image is uploaded and selected, **Design
+with AI** re-renders it as a monochrome sculpted relief — not a picture of a metal object,
+but the same scene, same composition and aspect ratio, with every element modelled as clear
+sculpted form, so the AI depth step turns it into a good heightmap:
 
-- **Style** chips (classic coin, deep sculpt, engraved, minimal, art deco) and a scrollable
-  **Add to the design** gallery of options, each with a placeholder image
-  (`static/relief/<id>.png`, drawn by `tools/make_relief_thumbs.py`): no background (first),
-  background textures (stippled, brushed, sunburst, guilloché, hammered, stars), shading
-  (deep, soft), an outline, and borders (beaded, laurel). Only one option per group applies
-  (e.g. one background). Picked options show as highlighted tags in the chatbox.
-- **Chatbox:** type your own request ("my dog as a pirate"). A typed request makes **4
-  variations**; style and options alone make **1 image**. Results are added to the
-  candidates (the first goes on the ring) and the height source switches to AI depth, since
-  a relief picture is lit sculpture. Generating from a result iterates on it.
-- **Faithfulness** slider: the Structure Control strength (default 0.8, close to the source).
-- **Usage** line at the top of the panel: images and dollars today and all time (plus the
-  balance on Stability). Every image is logged to `data/usage.jsonl` with its model and cost.
+- **What is it?** chips (Auto, Portrait, Animal, Landscape, Painting, Object, Logo/graphic):
+  each tells the model how to sculpt that kind of image (a painting's brushstrokes become
+  sculpted ridges, a landscape is layered from foreground to sky, …).
+- **Style** chips (classic relief, deep sculpt, engraved, minimal, art deco) and a
+  scrollable **Add to the design** gallery with a placeholder image per option
+  (`static/relief/<id>.png`, drawn by `tools/make_relief_thumbs.py`): no background
+  (first), background textures (stippled, brushed, sunburst, guilloché, hammered, stars),
+  shading (deep, soft), an outline, and borders (beaded, laurel). One option per group
+  applies. Picked choices show as highlighted tags in the chatbox.
+- **Chatbox:** type a change ("my dog as a pirate"). A typed request makes **4
+  variations**; choices alone make **1 image**. Results join the candidates (the first goes
+  on the ring) and the height source switches to AI depth.
+- **Every generation starts from the original upload**, even when a result is selected
+  (re-generating from results drifted further from the original each time), and results
+  are cropped to the original's exact aspect ratio.
+- **Faithfulness** slider and a **usage** line (images and dollars today and all time;
+  every image is logged to `data/usage.jsonl` with its model and cost).
 
-The prompt is layered (`app/relief_prompts.py`): a locked base (single-material silver
-bas-relief, frontal soft lighting, smooth castable forms, no colour or text, faithful to the
-source) + the style + the options + your text, with a fixed negative prompt. Styles and
-options are data in that file: add an entry (and rerun the thumbnail script) to add one.
+The prompt (`app/relief_prompts.py`) is short and direct, because editing models follow
+concise instructions and drop what comes late: "Convert this image into a monochrome
+<style> sculpture rendering in smooth matte grey clay…", then the picked options and your
+text, then the image-type guidance, faithfulness ("…apart from the requested changes", so
+it never forbids them) and rules. It never says coin, medal or portrait — an editing model
+takes those literally (it put Starry Night on a coin with an invented man). Styles, image
+types and options are data in that file.
+
+**Casting-friendly likeness.** Every prompt asks the model to keep the likeness but simplify
+for casting: wrinkles, pores, stubble, individual hairs and fabric texture become smooth
+broad planes, and hair and fur become a few bold, chunky locks. The Portrait and Animal
+types add that the person or pet must stay recognisable to someone who knows them.
+
+**Background options are flat, built by the app.** When a background option is picked (No
+background or a texture), the model is asked only for the subject on a plain grey
+background; the app then cuts the subject out (`background.subject_mask`, saved as
+`subject_mask.png`) and lays it on a background it draws itself, so the background never has
+shadows, depth or lighting:
+
+- *No background*: the background is exactly 0 in the heightmap.
+- *A texture*: the background is the texture's pattern, raised slightly —
+  `BACKGROUND_TEXTURE_HEIGHT` (0.12 of the relief height, `app/config.py`) — with the
+  subject sitting above it from `SUBJECT_BASE_LEVEL`.
+- Without a background option, nothing changes: the whole image is sculpted as usual.
+
+**Where the textures live:** `static/textures/` — one grayscale PNG per texture (white =
+raised, black = the flat background) and `textures.json` listing them as `{"id", "label",
+"file", "mode", "tile_mm"}`. `"tile"` textures repeat every `tile_mm` millimetres (the same
+density on every ring); `"cover"` textures stretch across the whole design area (sunburst,
+guilloché). The built-in six are drawn by `tools/make_textures.py` (rerun it to change them;
+it keeps any entries you add). `app/textures.py` loads, tiles and scales them, and draws the
+flat preview used in the candidate image. Each gallery option points at its texture via
+`Addition.texture` in `app/relief_prompts.py`. Keep features at least ~0.3 mm wide on the
+ring, or the minimum-feature step (0.25 mm) erases them. To add your own for now: drop a PNG
+in `static/textures/`, add an entry to `textures.json` and an `Addition` with that texture id.
 
 Generation (`app/relief.py`) uses, in order of preference:
 
 - **fal.ai** (`FAL_KEY` in `.env`): instruction-following image-editing models. Single images
   use `FAL_MODEL` (default FLUX.1 Kontext [pro], ~$0.04), the 4-variation requests the
   cheaper `FAL_MODEL_VARIATIONS` (default Kontext [dev], ~$0.025). Qwen Image Edit (Plus) and
-  FLUX.2 edit also work. The prompt is phrased as an instruction ("Transform this image
+  FLUX.2 edit also work. The prompt is phrased as an instruction ("Convert this image
   into …"), with the faithfulness slider spelled out in words, since these models have no
   structure-strength setting. The source goes up as a ~1 MP JPEG data URI; one image per
   call, requests in parallel. Costs are fal's list prices per model (`fal_price_usd`).
@@ -294,7 +331,7 @@ Generation (`app/relief.py`) uses, in order of preference:
 - Otherwise a free offline stand-in, so the flow still works.
 
 `RELIEF_PROVIDER` (fal / stability / mock) overrides the choice. Endpoints: `GET /api/relief/options`, `POST /api/relief`
-(`source_id`, `style`, `additions`, `text`, `fidelity`), `GET /api/usage`.
+(`source_id`, `style`, `image_type`, `additions`, `text`, `fidelity`), `GET /api/usage`.
 
 ### Image enhancement
 

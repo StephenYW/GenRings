@@ -40,19 +40,9 @@
       </section>
 
       <section>
-        <label for="prompt">Design description</label>
-        <textarea id="prompt" rows="3" placeholder="e.g. a howling wolf under a crescent moon"></textarea>
-
-        <label for="preset">Style preset</label>
-        <select id="preset"></select>
-
-        <button id="generateBtn">Generate image</button>
-        <p class="hint">Each click generates one image (one billed API call). Click again to add more for comparison.</p>
-        <div id="generateStatus" class="status"></div>
-
-        <div class="or-divider">or</div>
-        <label for="photoUploadInput" class="upload-label">Upload your own photo/artwork</label>
+        <label for="photoUploadInput" class="upload-label">Upload a photo or artwork</label>
         <input type="file" id="photoUploadInput" accept="image/png,image/jpeg,image/webp" />
+        <div id="uploadStatus" class="status"></div>
       </section>
 
       <section>
@@ -62,7 +52,9 @@
 
       <section id="aiSection" hidden>
         <label>Design with AI</label>
-        <p class="hint">Re-sculpts the selected image as a silver relief, staying close to it. Pick a style and extras, and/or describe a change.</p>
+        <p class="hint">Re-renders your uploaded image as a sculpted relief that converts well into a heightmap (via AI depth), keeping its composition and shape. Every generation starts from your original upload.</p>
+        <label>What is it?</label>
+        <div id="aiTypes" class="chip-row"></div>
         <label>Style</label>
         <div id="aiStyles" class="chip-row"></div>
         <label>Add to the design</label>
@@ -170,6 +162,6 @@
     </main>
   </div>
 
-  <script type="module" src="/main.js?v=relief2"></script>
+  <script type="module" src="/main.js?v=relief3"></script>
 </body>
 </html>

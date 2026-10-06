@@ -1,42 +1,62 @@
 """
-Prompt building for AI relief generation (image -> sculpted metal relief).
+Prompt building for AI relief generation.
 
-The prompt is built in layers so the result always suits casting, whatever
-the user adds:
+The goal is NOT a picture of a metal object: it's the same image, re-rendered
+so AI depth estimation turns it into a good heightmap -- one material, every
+element modelled as clear sculpted form with readable depth, lit softly from
+the front, no colour, no clutter. So the prompt never says "coin", "medal" or
+"portrait" (an editing model takes those literally: it puts the scene on a
+coin, or invents a portrait when there's no person). It's kept short and
+direct, because editing models (FLUX Kontext etc.) follow concise
+instructions and drop what comes late in a long prompt.
 
-  1. a locked base: re-render the source as a single-material polished silver
-     bas-relief, lit flat from the front, smooth castable forms, no colour or
-     text -- and stay close to the source's subject, pose and features;
-  2. a style preset (classic coin, deep sculpt, ...);
-  3. any additions picked from the gallery (background textures, shading,
-     borders); within a group (e.g. background) only one applies;
-  4. the user's own words, if any, placed as the subject description.
+Layers, in order:
+  1. the conversion instruction (with the style's relief character);
+  2. what kind of image it is (portrait, animal, landscape, painting, ...),
+     so each is sculpted in the way that suits it;
+  3. the options picked from the gallery (background, shading, outline,
+     border), one per group, as direct instructions;
+  4. the user's own words, as a change to make;
+  5. faithfulness (keep composition/framing/aspect) and the hard rules.
 
-Additions and styles are data: add an entry here and it shows up in the
-panel, with its placeholder image at static/relief/<id>.png
-(tools/make_relief_thumbs.py draws them).
+Styles, image types and options are data: add an entry here and it shows up
+in the panel (options also need a placeholder image, static/relief/<id>.png,
+drawn by tools/make_relief_thumbs.py).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-BASE = (
-    "a polished sterling silver bas-relief medallion of {subject}, sculpted solid metal relief, "
-    "one single material, monochrome silver, frontal soft even studio lighting, smooth continuous "
-    "sculpted forms with clear depth, crisp clean silhouette, clear separation between subject and "
-    "background, simplified shapes that can be cast in metal, faithful to the original's subject, "
-    "pose, proportions and features"
-)
-DEFAULT_SUBJECT = "the subject of this image"
-NEGATIVE = (
-    "color, colorful, photograph, photorealistic, skin texture, film grain, noise, text, letters, "
-    "words, watermark, signature, logo, frame, cluttered, messy, tiny fragile details, blurry, "
-    "low quality, deformed, distorted proportions, extra limbs, cartoon, flat 2d drawing"
-)
+CONVERT = "Convert this image into a monochrome {style} sculpture rendering in smooth matte grey clay"
+DESCRIBE = ("monochrome {style} sculpture rendering in smooth matte grey clay of the same scene as the source "
+            "image, every element sculpted with clear depth and volume, soft even frontal lighting")
+# Casting-friendly simplification, for every image: keep the likeness, lose
+# the photographic fine detail that reads as noise in metal.
+CASTING = ("Simplify it for metal casting while keeping the likeness: replace fine detail (wrinkles, pores, "
+           "stubble, individual hairs, fabric texture) with smooth broad planes, and sculpt hair and fur as a "
+           "few bold, chunky grouped locks.")
+# With a background option, the model draws only the subject on a plain flat
+# background; the app cuts it out and builds the background itself (flat,
+# shadow-free, the chosen texture raised slightly -- see app/textures.py).
+SUBJECT_ONLY = ("Show only the main subject, cleanly separated, on a perfectly plain, flat, uniform light grey "
+                "background: no texture, no gradient, no lighting or shading on the background, and no shadow "
+                "cast by the subject.")
+RULES = ("Clear readable depth (near parts raised, far parts recessed), soft even frontal light, one material, "
+         "no colour, no text. Do not add a coin, medal, frame or border unless asked, or add or remove subjects.")
+NEGATIVE = ("color, text, letters, watermark, signature, coin, medal, medallion, frame, border, extra people, "
+            "extra subjects, photograph, noise, grain, blurry, low quality, deformed, cluttered")
 
 
 @dataclass(frozen=True)
 class Style:
+    id: str
+    label: str
+    relief: str     # goes into CONVERT as {style}
+    detail: str     # an extra sentence
+
+
+@dataclass(frozen=True)
+class ImageType:
     id: str
     label: str
     prompt: str
@@ -46,36 +66,60 @@ class Style:
 class Addition:
     id: str
     label: str
-    group: str   # one addition per group applies (the last one picked)
+    group: str      # one addition per group applies (the last one picked)
     prompt: str
+    texture: str | None = None  # background options: the texture the app lays behind the subject
 
 
 STYLES: dict[str, Style] = {s.id: s for s in [
-    Style("classic", "Classic coin", "classic coin portrait relief, balanced low relief, refined detail"),
-    Style("deep", "Deep sculpt", "high relief sculpture with deep pronounced forms and strong volume"),
-    Style("engraved", "Engraved", "fine engraved line work and crisp incised details, like a hand-engraved medal"),
-    Style("minimal", "Minimal", "minimalist simplified forms, few large smooth planes, elegant and clean"),
-    Style("art_deco", "Art deco", "art deco relief style, stylised geometric forms and streamlined planes"),
+    Style("classic", "Classic relief", "low-relief", "Refined, balanced detail with gentle depth."),
+    Style("deep", "Deep sculpt", "high-relief", "Bold, pronounced forms with strong depth and volume."),
+    Style("engraved", "Engraved", "carved low-relief", "Crisp carved lines and incised detail."),
+    Style("minimal", "Minimal", "simplified low-relief", "Few large smooth planes, minimal fine detail."),
+    Style("art_deco", "Art deco", "art deco relief", "Stylised geometric forms and streamlined planes."),
 ]}
 DEFAULT_STYLE = "classic"
 
-ADDITIONS: dict[str, Addition] = {a.id: a for a in [
-    Addition("no_background", "No background", "background",
-             "the subject isolated on a perfectly plain, flat, smooth empty background"),
-    Addition("stippled", "Stippled", "background", "a finely stippled dotted texture covering the background"),
-    Addition("brushed", "Brushed lines", "background", "fine parallel brushed lines across the background"),
-    Addition("sunburst", "Sunburst", "background", "radiating sunburst rays fanning out behind the subject"),
-    Addition("guilloche", "Guilloché", "background",
-             "intricate guilloché wave engraving in the background, like a banknote"),
-    Addition("hammered", "Hammered", "background", "a hand-hammered dimpled metal texture in the background"),
-    Addition("stars", "Stars", "background", "small raised stars scattered across the background"),
-    Addition("deep_shading", "Deep shading", "shading",
-             "dramatic deep sculpted shading with strong recesses and high points"),
-    Addition("soft_shading", "Soft shading", "shading", "soft gentle shading and subtle low relief modelling"),
-    Addition("outline", "Outline", "outline", "a crisp engraved outline tracing the subject's silhouette"),
-    Addition("beaded_border", "Beaded border", "border", "a raised beaded rim running around the edge"),
-    Addition("laurel", "Laurel wreath", "border", "a sculpted laurel wreath framing the subject"),
+IMAGE_TYPES: dict[str, ImageType] = {t.id: t for t in [
+    ImageType("auto", "Auto", "Sculpt whatever the image shows -- people, animals, objects, landscapes or "
+              "abstract shapes -- as it is."),
+    ImageType("portrait", "Portrait", "It is a portrait of a real person who must stay instantly recognisable: "
+              "keep their exact face shape, features, proportions, expression and hairstyle."),
+    ImageType("animal", "Animal", "It shows an animal (perhaps a pet) that its owner must recognise: keep its "
+              "exact breed, proportions, markings and expression."),
+    ImageType("landscape", "Landscape", "It is a landscape: build depth in layers from foreground to "
+              "background -- near features raised highest, the sky and distance lowest."),
+    ImageType("painting", "Painting", "It is a painting: keep its composition and every element, and turn its "
+              "brushstrokes, swirls and textures into sculpted ridges and grooves."),
+    ImageType("object", "Object", "It shows an object: sculpt its shape and surface details with crisp "
+              "edges and correct proportions."),
+    ImageType("logo", "Logo / graphic", "It is a logo or graphic: make its shapes flat raised plateaus at "
+              "two or three clear heights, with crisp edges."),
 ]}
+DEFAULT_IMAGE_TYPE = "auto"
+
+ADDITIONS: dict[str, Addition] = {a.id: a for a in [
+    # Background options: the model draws the subject alone (SUBJECT_ONLY) and
+    # the app adds the flat background, textured with static/textures/<texture>.png.
+    Addition("no_background", "No background", "background", SUBJECT_ONLY),
+    Addition("stippled", "Stippled", "background", SUBJECT_ONLY, "stippled"),
+    Addition("brushed", "Brushed lines", "background", SUBJECT_ONLY, "brushed"),
+    Addition("sunburst", "Sunburst", "background", SUBJECT_ONLY, "sunburst"),
+    Addition("guilloche", "Guilloché", "background", SUBJECT_ONLY, "guilloche"),
+    Addition("hammered", "Hammered", "background", SUBJECT_ONLY, "hammered"),
+    Addition("stars", "Stars", "background", SUBJECT_ONLY, "stars"),
+    Addition("deep_shading", "Deep shading", "shading",
+             "Exaggerate the depth: deep recesses and strongly raised high points."),
+    Addition("soft_shading", "Soft shading", "shading", "Keep the depth gentle and shallow, with soft transitions."),
+    Addition("outline", "Outline", "outline", "Add a crisp carved outline tracing the main subject's silhouette."),
+    Addition("beaded_border", "Beaded border", "border", "Add a raised beaded border running around the edge of the image."),
+    Addition("laurel", "Laurel wreath", "border", "Add a sculpted laurel wreath framing the main subject."),
+]}
+
+
+def background_choice(ids: list[str]) -> Addition | None:
+    """The background option picked, if any (no background, or a texture)."""
+    return next((a for a in resolve_additions(ids) if a.group == "background"), None)
 
 
 def resolve_additions(ids: list[str]) -> list[Addition]:
@@ -89,38 +133,54 @@ def resolve_additions(ids: list[str]) -> list[Addition]:
     return list(by_group.values())
 
 
-def fidelity_phrase(fidelity: float) -> str:
+def fidelity_phrase(fidelity: float, has_changes: bool = False) -> str:
     """How much the result may depart from the source, in words -- for editing
-    models that have no structure-strength setting."""
+    models that have no structure-strength setting. With requested changes
+    (options or the user's text) it must not forbid them, or the model keeps
+    the original background etc. and ignores the request."""
+    except_changes = " apart from the requested changes" if has_changes else ""
     if fidelity >= 0.75:
-        return ("keep the exact composition, framing, pose, proportions and identity of the original image; "
-                "change only the material and style")
+        return (f"Keep the exact composition, framing, proportions and positions of everything in the "
+                f"original{except_changes}.")
     if fidelity >= 0.55:
-        return "keep the subject clearly recognisable, with the same overall composition"
-    return "feel free to reinterpret the composition creatively"
+        return f"Keep the same overall composition and keep everything recognisable{except_changes}."
+    return "You may reinterpret the composition creatively."
 
 
 def build_relief_prompt(style_id: str, addition_ids: list[str], user_text: str = "",
-                        instruction: bool = False, fidelity: float = 0.8) -> tuple[str, str]:
+                        instruction: bool = False, fidelity: float = 0.8,
+                        image_type: str = DEFAULT_IMAGE_TYPE) -> tuple[str, str]:
     """(prompt, negative prompt) for one relief generation. `instruction`
-    phrases it as an edit ("Transform this image into ...") for
-    instruction-following editing models, with the faithfulness spelled out
-    and the negatives folded in (most of them take no negative prompt)."""
-    subject = user_text.strip() or DEFAULT_SUBJECT
-    parts = [BASE.format(subject=subject), STYLES.get(style_id, STYLES[DEFAULT_STYLE]).prompt]
-    parts += [a.prompt for a in resolve_additions(addition_ids)]
+    phrases it as a direct edit for instruction-following editing models
+    (fal: FLUX Kontext, Qwen Image Edit, FLUX.2); otherwise it's a
+    description, for Stable Diffusion with structure control (Stability)."""
+    style = STYLES.get(style_id, STYLES[DEFAULT_STYLE])
+    kind = IMAGE_TYPES.get(image_type, IMAGE_TYPES[DEFAULT_IMAGE_TYPE])
+    adds = [a.prompt for a in resolve_additions(addition_ids)]
+    text = user_text.strip()
     if not instruction:
-        return ", ".join(parts), NEGATIVE
-    text = "Transform this image into " + ", ".join(parts) + ". " + fidelity_phrase(fidelity).capitalize() + "."
-    text += " No color, no text or letters, no photographic texture, no frame."
-    return text, NEGATIVE
+        parts = [DESCRIBE.format(style=style.relief), style.detail, kind.prompt, CASTING, *adds]
+        if text:
+            parts.insert(1, text)
+        return " ".join(parts), NEGATIVE
+    # the requested changes come straight after the main instruction, where
+    # editing models weigh them most
+    bg = background_choice(addition_ids)
+    convert = CONVERT.format(style=style.relief) + ("." if bg else ", showing exactly the same scene.")
+    parts = [convert, *adds]
+    if text:
+        parts.append(f"Also make this change: {text}.")
+    parts += [kind.prompt, style.detail, CASTING, fidelity_phrase(fidelity, bool(adds or text)), RULES]
+    return " ".join(parts), NEGATIVE
 
 
 def options() -> dict:
-    """What the panel shows: styles and additions (in gallery order)."""
+    """What the panel shows: styles, image types and additions (in gallery order)."""
     return {
         "styles": [{"id": s.id, "label": s.label} for s in STYLES.values()],
         "default_style": DEFAULT_STYLE,
+        "image_types": [{"id": t.id, "label": t.label} for t in IMAGE_TYPES.values()],
+        "default_image_type": DEFAULT_IMAGE_TYPE,
         "additions": [{"id": a.id, "label": a.label, "group": a.group, "thumb": f"/relief/{a.id}.png"}
                       for a in ADDITIONS.values()],
     }

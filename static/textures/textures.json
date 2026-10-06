@@ -1,0 +1,46 @@
+{
+ "textures": [
+  {
+   "id": "stippled",
+   "label": "Stippled",
+   "file": "stippled.png",
+   "mode": "tile",
+   "tile_mm": 4.0
+  },
+  {
+   "id": "brushed",
+   "label": "Brushed lines",
+   "file": "brushed.png",
+   "mode": "tile",
+   "tile_mm": 5.0
+  },
+  {
+   "id": "hammered",
+   "label": "Hammered",
+   "file": "hammered.png",
+   "mode": "tile",
+   "tile_mm": 6.0
+  },
+  {
+   "id": "stars",
+   "label": "Stars",
+   "file": "stars.png",
+   "mode": "tile",
+   "tile_mm": 7.0
+  },
+  {
+   "id": "sunburst",
+   "label": "Sunburst",
+   "file": "sunburst.png",
+   "mode": "cover",
+   "tile_mm": null
+  },
+  {
+   "id": "guilloche",
+   "label": "Guilloch\u00e9",
+   "file": "guilloche.png",
+   "mode": "cover",
+   "tile_mm": null
+  }
+ ]
+}
