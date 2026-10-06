@@ -149,12 +149,20 @@ STABILITY_API_KEY = os.environ.get("STABILITY_API_KEY", "")
 # "fal" (preferred), "stability", or "mock"; picked from whichever key is set unless given
 RELIEF_PROVIDER = os.environ.get(
     "RELIEF_PROVIDER", "fal" if FAL_KEY else "stability" if STABILITY_API_KEY else "mock").lower()
-# fal.ai image-editing models (https://fal.ai/models): one for single images, a
-# cheaper one for the 4-variation requests. Any of: fal-ai/flux-pro/kontext,
+# fal.ai image-editing models (https://fal.ai/models): one for single images, one
+# for the 4-variation requests (both Kontext [dev], ~$0.025/image, by default;
+# fal-ai/flux-pro/kontext is ~$0.04 and a little more faithful). Any of: fal-ai/flux-pro/kontext,
 # fal-ai/flux-kontext/dev, fal-ai/qwen-image-edit, fal-ai/qwen-image-edit-plus,
 # fal-ai/flux-2/edit, fal-ai/flux-2-pro/edit.
-FAL_MODEL = os.environ.get("FAL_MODEL", "fal-ai/flux-pro/kontext")
+FAL_MODEL = os.environ.get("FAL_MODEL", "fal-ai/flux-kontext/dev")
 FAL_MODEL_VARIATIONS = os.environ.get("FAL_MODEL_VARIATIONS", "fal-ai/flux-kontext/dev")
+# The models the "Design with AI" panel lets you pick between (id, label). A
+# picked model makes both single images and variations; with none picked the
+# two settings above apply.
+FAL_MODEL_CHOICES = [
+    ("fal-ai/flux-2/edit", "FLUX.2"),
+    ("fal-ai/flux-pro/kontext", "Kontext [pro]"),
+]
 STABILITY_API_BASE = os.environ.get("STABILITY_API_BASE", "https://api.stability.ai")
 STABILITY_CREDITS_PER_IMAGE = float(os.environ.get("STABILITY_CREDITS_PER_IMAGE", "5"))  # Structure Control
 STABILITY_USD_PER_CREDIT = float(os.environ.get("STABILITY_USD_PER_CREDIT", "0.01"))

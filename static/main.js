@@ -1112,7 +1112,7 @@ function renderGallery(candidates) {
 // Design with AI: re-sculpt the selected image as a relief (POST /api/relief)
 // ---------------------------------------------------------------------------
 
-const AI = { options: null, style: null, imageType: null, additions: [], busy: false };
+const AI = { options: null, model: null, style: null, imageType: null, additions: [], busy: false };
 
 async function initAI() {
   try {
@@ -1123,6 +1123,20 @@ async function initAI() {
   }
   AI.style = AI.options.default_style;
   AI.imageType = AI.options.default_image_type;
+  // model picker (fal only): switch between models to compare them
+  const choices = AI.options.model_choices || [];
+  AI.model = AI.options.default_model || (choices[0] && choices[0].id) || null;
+  document.getElementById("aiModelRow").hidden = choices.length === 0;
+  const models = document.getElementById("aiModels");
+  for (const m of choices) {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.textContent = m.label;
+    b.dataset.id = m.id;
+    b.title = `${m.id} · ~$${m.price_usd.toFixed(3)} per image`;
+    b.addEventListener("click", () => { AI.model = m.id; renderAIChoices(); });
+    models.appendChild(b);
+  }
   const fid = document.getElementById("aiFidelity");
   fid.value = AI.options.fidelity_default;
   const showFid = () => {
@@ -1191,6 +1205,7 @@ function renderAIChoices() {
   if (!AI.options) return;
   document.querySelectorAll("#aiStyles .chip").forEach((b) => b.classList.toggle("on", b.dataset.id === AI.style));
   document.querySelectorAll("#aiTypes .chip").forEach((b) => b.classList.toggle("on", b.dataset.id === AI.imageType));
+  document.querySelectorAll("#aiModels .chip").forEach((b) => b.classList.toggle("on", b.dataset.id === AI.model));
   document.querySelectorAll("#aiAdditions .addition-card").forEach((c) => c.classList.toggle("on", AI.additions.includes(c.dataset.id)));
   const chips = document.getElementById("aiChips");
   chips.innerHTML = "";
@@ -1219,7 +1234,8 @@ function renderAIChoices() {
   }
   const typed = document.getElementById("aiText").value.trim().length > 0;
   const n = typed ? AI.options.images_with_text : AI.options.images_default;
-  const usd = n * (typed ? AI.options.price_usd_variation : AI.options.price_usd_single);
+  const picked = (AI.options.model_choices || []).find((m) => m.id === AI.model);
+  const usd = n * (picked ? picked.price_usd : typed ? AI.options.price_usd_variation : AI.options.price_usd_single);
   const price = AI.options.provider === "mock" ? "free offline preview" : `~$${usd.toFixed(usd < 0.1 ? 3 : 2)}`;
   const btn = document.getElementById("aiGenerateBtn");
   btn.textContent = AI.busy ? "Generating…" : `Generate ${n === 1 ? "1 image" : n + " variations"} · ${price}`;
@@ -1243,7 +1259,9 @@ async function generateRelief() {
   const extras = AI.additions.map((id) => AI.options.additions.find((a) => a.id === id).label);
   const kind = AI.imageType !== AI.options.default_image_type
     ? [AI.options.image_types.find((t) => t.id === AI.imageType).label] : [];
-  addChatMessage(`You: ${[style, ...kind, ...extras].join(" + ")}${text ? " — “" + text + "”" : ""}`, "you");
+  const picked = (AI.options.model_choices || []).find((m) => m.id === AI.model);
+  const model = picked ? [picked.label] : [];
+  addChatMessage(`You: ${[...model, style, ...kind, ...extras].join(" + ")}${text ? " — “" + text + "”" : ""}`, "you");
   AI.busy = true;
   renderAIChoices();
   setStatus("aiStatus", "Sculpting your relief… this takes a few seconds per image.");
@@ -1252,7 +1270,7 @@ async function generateRelief() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ source_id: state.selectedCandidateId, style: AI.style, image_type: AI.imageType,
-                             additions: AI.additions, text,
+                             additions: AI.additions, text, model: AI.model,
                              fidelity: parseFloat(document.getElementById("aiFidelity").value) }),
     });
     if (!res.ok) {

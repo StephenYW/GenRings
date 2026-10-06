@@ -51,6 +51,7 @@ class ReliefRequest(BaseModel):
     additions: list[str] = []                        # ids from relief_prompts.ADDITIONS, in the order picked
     text: str = Field(default="", max_length=500)    # the user's own request; if given, 4 variations are made
     fidelity: float = Field(default=config.RELIEF_FIDELITY_DEFAULT, ge=0.0, le=1.0)
+    model: str | None = None                         # fal: one of config.FAL_MODEL_CHOICES, for comparing models
 
 
 class ReliefResponse(BaseModel):
@@ -223,7 +224,13 @@ def relief_options():
     except relief.ReliefError:
         price_single = price_variation = 0.0
         models = None
+    # the model picker (fal only); the configured single-image model is
+    # preselected when it's one of the choices
+    choices = [{"id": m, "label": label, "price_usd": relief.fal_price_usd(m, 1.0)}
+               for m, label in config.FAL_MODEL_CHOICES] if config.RELIEF_PROVIDER == "fal" else []
+    default_model = next((c["id"] for c in choices if c["id"] == config.FAL_MODEL), None)
     return {**relief_prompts.options(), "provider": config.RELIEF_PROVIDER, "models": models,
+            "model_choices": choices, "default_model": default_model,
             "price_usd_single": price_single, "price_usd_variation": price_variation,
             "images_with_text": config.RELIEF_IMAGES_WITH_TEXT, "images_default": config.RELIEF_IMAGES_DEFAULT,
             "fidelity_default": config.RELIEF_FIDELITY_DEFAULT}
@@ -246,6 +253,8 @@ def generate_relief(req: ReliefRequest):
         raise HTTPException(400, f"Unknown style '{req.style}'")
     if req.image_type not in relief_prompts.IMAGE_TYPES:
         raise HTTPException(400, f"Unknown image type '{req.image_type}'")
+    if req.model and req.model not in dict(config.FAL_MODEL_CHOICES):
+        raise HTTPException(400, f"Unknown model '{req.model}'")
     # Always work from the original image: re-generating from a result drifts
     # further from the original each time.
     origin_id = _original_of(req.source_id)
@@ -257,7 +266,7 @@ def generate_relief(req: ReliefRequest):
         prompt, negative = relief_prompts.build_relief_prompt(
             req.style, req.additions, req.text, instruction=provider.instruction, fidelity=req.fidelity,
             image_type=req.image_type)
-        images = relief.generate_many(provider, rgb, prompt, negative, req.fidelity, n)
+        images = relief.generate_many(provider, rgb, prompt, negative, req.fidelity, n, model=req.model)
     except relief.ReliefError as err:
         raise HTTPException(502, str(err))
 
@@ -277,8 +286,9 @@ def generate_relief(req: ReliefRequest):
             # The model drew the subject on a plain background: cut it out and
             # build the background here -- flat, shadow-free, with the chosen
             # texture (raised slightly in the heightmap, see /api/process).
+            storage.save_rgb_png(d / "generated.png", full)  # the model's own image, before compositing
             try:
-                mask = background.subject_mask(full)
+                mask = background.solid_subject_mask(full)
             except background.BackgroundRemovalUnavailable as err:
                 raise HTTPException(503, str(err))
             cv2.imwrite(str(d / "subject_mask.png"), mask)

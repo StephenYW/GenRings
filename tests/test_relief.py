@@ -124,6 +124,7 @@ def test_bad_requests(client):
     assert client.post("/api/relief", json={"source_id": "0" * 32}).status_code == 404
     src = _upload(client)
     assert client.post("/api/relief", json={"source_id": src, "style": "nope"}).status_code == 400
+    assert client.post("/api/relief", json={"source_id": src, "model": "fal-ai/nope"}).status_code == 400
 
 
 def test_stability_request(monkeypatch):
@@ -208,6 +209,8 @@ def test_fal_request(monkeypatch, model, image_field, negative):
 
 def test_fal_variations_use_the_cheaper_model_and_errors_are_reported(monkeypatch):
     monkeypatch.setattr(config, "FAL_KEY", "fal-test")
+    monkeypatch.setattr(config, "FAL_MODEL", "fal-ai/flux-pro/kontext")
+    monkeypatch.setattr(config, "FAL_MODEL_VARIATIONS", "fal-ai/flux-kontext/dev")
     p = relief.FalRelief()
     assert p.model_for(True) == config.FAL_MODEL_VARIATIONS and p.model_for(False) == config.FAL_MODEL
     assert p.price_usd(True) <= p.price_usd(False)
@@ -217,3 +220,35 @@ def test_fal_variations_use_the_cheaper_model_and_errors_are_reported(monkeypatc
         lambda r: httpx.Response(401, json={"detail": "Invalid key"})))
     with pytest.raises(relief.ReliefError, match="Invalid key"):
         p.generate(np.zeros((100, 100, 3), np.uint8), "x", "y", 0.8, 1)
+
+
+def test_picked_model_makes_singles_and_variations(client, monkeypatch):
+    """The panel's model picker: offered with prices (fal only), and the picked
+    model is the one called -- for variations too, so models compare like for like."""
+    monkeypatch.setattr(config, "RELIEF_PROVIDER", "fal")
+    monkeypatch.setattr(config, "FAL_KEY", "fal-test")
+    monkeypatch.setattr(config, "FAL_MODEL", "fal-ai/flux-2/edit")
+    opts = client.get("/api/relief/options").json()
+    assert [c["id"] for c in opts["model_choices"]] == [m for m, _ in config.FAL_MODEL_CHOICES]
+    assert opts["default_model"] == "fal-ai/flux-2/edit"
+    assert all(c["price_usd"] > 0 for c in opts["model_choices"])
+
+    called = []
+
+    def fake_generate(self, rgb, prompt, negative, fidelity, seed, variation=False, model=None):
+        used = self.model_for(variation, model)
+        called.append(used)
+        return relief.ReliefImage(rgb=rgb.copy(), seed=seed, credits=0, usd=0.04, model=used)
+
+    monkeypatch.setattr(relief.FalRelief, "generate", fake_generate)
+    src = _upload(client)
+    r = client.post("/api/relief", json={"source_id": src, "model": "fal-ai/flux-pro/kontext", "text": "x"})
+    assert r.status_code == 200 and called == ["fal-ai/flux-pro/kontext"] * config.RELIEF_IMAGES_WITH_TEXT
+    called.clear()
+    client.post("/api/relief", json={"source_id": src})                   # none picked: the configured model
+    assert called == ["fal-ai/flux-2/edit"]
+
+
+def test_no_model_choices_without_fal(client):
+    opts = client.get("/api/relief/options").json()
+    assert opts["model_choices"] == [] and opts["default_model"] is None

@@ -84,11 +84,11 @@ class StabilityRelief:
 
         self._http = httpx.Client(timeout=120)
 
-    def price_usd(self, variation: bool = False) -> float:
+    def price_usd(self, variation: bool = False, model: str | None = None) -> float:
         return config.STABILITY_CREDITS_PER_IMAGE * config.STABILITY_USD_PER_CREDIT
 
     def generate(self, rgb: np.ndarray, prompt: str, negative: str, fidelity: float, seed: int,
-                 variation: bool = False) -> ReliefImage:
+                 variation: bool = False, model: str | None = None) -> ReliefImage:
         buf = io.BytesIO()
         Image.fromarray(_fit_for_api(rgb)).save(buf, format="PNG")
         try:
@@ -129,11 +129,11 @@ class MockRelief:
     name = "mock"
     instruction = False
 
-    def price_usd(self, variation: bool = False) -> float:
+    def price_usd(self, variation: bool = False, model: str | None = None) -> float:
         return 0.0
 
     def generate(self, rgb: np.ndarray, prompt: str, negative: str, fidelity: float, seed: int,
-                 variation: bool = False) -> ReliefImage:
+                 variation: bool = False, model: str | None = None) -> ReliefImage:
         rng = np.random.default_rng(seed)
         g = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255
         g = cv2.bilateralFilter(g, 0, 0.15, 6)
@@ -200,11 +200,12 @@ class FalRelief:
 
         self._http = httpx.Client(timeout=180, follow_redirects=True)
 
-    def model_for(self, variation: bool) -> str:
-        return config.FAL_MODEL_VARIATIONS if variation else config.FAL_MODEL
+    def model_for(self, variation: bool, model: str | None = None) -> str:
+        """The picked model if any, else the configured one for singles/variations."""
+        return model or (config.FAL_MODEL_VARIATIONS if variation else config.FAL_MODEL)
 
-    def price_usd(self, variation: bool = False) -> float:
-        return fal_price_usd(self.model_for(variation), 1.0)
+    def price_usd(self, variation: bool = False, model: str | None = None) -> float:
+        return fal_price_usd(self.model_for(variation, model), 1.0)
 
     @staticmethod
     def _data_uri(rgb: np.ndarray) -> tuple[str, int, int]:
@@ -234,8 +235,8 @@ class FalRelief:
         return body
 
     def generate(self, rgb: np.ndarray, prompt: str, negative: str, fidelity: float, seed: int,
-                 variation: bool = False) -> ReliefImage:
-        model = self.model_for(variation)
+                 variation: bool = False, model: str | None = None) -> ReliefImage:
+        model = self.model_for(variation, model)
         image, w, h = self._data_uri(rgb)
         try:
             res = self._http.post(FAL_RUN + model, headers={"Authorization": f"Key {config.FAL_KEY}"},
@@ -279,12 +280,15 @@ def get_relief_provider():
     return MockRelief()
 
 
-def generate_many(provider, rgb: np.ndarray, prompt: str, negative: str, fidelity: float, n: int) -> list[ReliefImage]:
+def generate_many(provider, rgb: np.ndarray, prompt: str, negative: str, fidelity: float, n: int,
+                  model: str | None = None) -> list[ReliefImage]:
     """n images with different random seeds, requested in parallel. More than
-    one is a "variations" request (fal: the cheaper variations model)."""
+    one is a "variations" request (fal: the variations model, unless `model`
+    picks one for both)."""
     seeds = [int(s) for s in np.random.default_rng().integers(0, 2_147_483_647, n)]
     with ThreadPoolExecutor(max_workers=min(n, 4)) as pool:
-        return list(pool.map(lambda s: provider.generate(rgb, prompt, negative, fidelity, s, variation=n > 1), seeds))
+        return list(pool.map(lambda s: provider.generate(rgb, prompt, negative, fidelity, s, variation=n > 1,
+                                                       model=model), seeds))
 
 
 # --- usage -------------------------------------------------------------------------

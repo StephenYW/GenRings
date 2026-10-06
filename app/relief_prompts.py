@@ -42,8 +42,10 @@ SUBJECT_ONLY = ("Show only the main subject, cleanly separated, on a perfectly p
                 "background: no texture, no gradient, no lighting or shading on the background, and no shadow "
                 "cast by the subject.")
 RULES = ("Clear readable depth (near parts raised, far parts recessed), soft even frontal light, one material, "
-         "no colour, no text. Do not add a coin, medal, frame or border unless asked, or add or remove subjects.")
-NEGATIVE = ("color, text, letters, watermark, signature, coin, medal, medallion, frame, border, extra people, "
+         "no colour, no text. Keep people and animals at the same size and framing as in the original, with "
+         "all of their visible body, arms and clothing -- never crop them into a bust. Do not add a coin, medal, "
+         "frame or border unless asked, or add or remove subjects.")
+NEGATIVE = ("color, text, letters, watermark, signature, coin, medal, medallion, bust, frame, border, extra people, "
             "extra subjects, photograph, noise, grain, blurry, low quality, deformed, cluttered")
 
 

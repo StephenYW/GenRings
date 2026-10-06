@@ -320,8 +320,11 @@ in `static/textures/`, add an entry to `textures.json` and an `Addition` with th
 Generation (`app/relief.py`) uses, in order of preference:
 
 - **fal.ai** (`FAL_KEY` in `.env`): instruction-following image-editing models. Single images
-  use `FAL_MODEL` (default FLUX.1 Kontext [pro], ~$0.04), the 4-variation requests the
-  cheaper `FAL_MODEL_VARIATIONS` (default Kontext [dev], ~$0.025). Qwen Image Edit (Plus) and
+  use `FAL_MODEL`, the 4-variation requests `FAL_MODEL_VARIATIONS`; both default to FLUX.1
+  Kontext [dev] (~$0.025). Kontext [pro] (`fal-ai/flux-pro/kontext`, ~$0.04) is a little more
+  faithful. The panel's **Model** chips (FLUX.2 / Kontext [pro], `FAL_MODEL_CHOICES` in
+  `app/config.py`) switch between models for comparing them: the picked model makes both
+  single images and variations, and the button shows its price. Qwen Image Edit (Plus) and
   FLUX.2 edit also work. The prompt is phrased as an instruction ("Convert this image
   into …"), with the faithfulness slider spelled out in words, since these models have no
   structure-strength setting. The source goes up as a ~1 MP JPEG data URI; one image per
@@ -331,7 +334,7 @@ Generation (`app/relief.py`) uses, in order of preference:
 - Otherwise a free offline stand-in, so the flow still works.
 
 `RELIEF_PROVIDER` (fal / stability / mock) overrides the choice. Endpoints: `GET /api/relief/options`, `POST /api/relief`
-(`source_id`, `style`, `image_type`, `additions`, `text`, `fidelity`), `GET /api/usage`.
+(`source_id`, `style`, `image_type`, `additions`, `text`, `fidelity`, `model`), `GET /api/usage`.
 
 ### Image enhancement
 
