@@ -1132,12 +1132,192 @@ function renderGallery(candidates) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Design with AI: re-sculpt the selected image as a relief (POST /api/relief)
+// ---------------------------------------------------------------------------
+
+const AI = { options: null, style: null, additions: [], busy: false };
+
+async function initAI() {
+  try {
+    AI.options = await (await fetch("/api/relief/options")).json();
+  } catch (err) {
+    console.warn("AI relief options unavailable", err);
+    return;
+  }
+  AI.style = AI.options.default_style;
+  const fid = document.getElementById("aiFidelity");
+  fid.value = AI.options.fidelity_default;
+  const showFid = () => {
+    const f = parseFloat(fid.value);
+    document.getElementById("aiFidelityVal").textContent = f >= 0.75 ? "(close)" : f >= 0.55 ? "(balanced)" : "(creative)";
+  };
+  fid.addEventListener("input", showFid);
+  showFid();
+
+  const styles = document.getElementById("aiStyles");
+  for (const st of AI.options.styles) {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.textContent = st.label;
+    b.dataset.id = st.id;
+    b.addEventListener("click", () => { AI.style = st.id; renderAIChoices(); });
+    styles.appendChild(b);
+  }
+  const strip = document.getElementById("aiAdditions");
+  for (const a of AI.options.additions) {
+    const card = document.createElement("div");
+    card.className = "addition-card";
+    card.dataset.id = a.id;
+    card.title = a.label;
+    const img = document.createElement("img");
+    img.src = a.thumb;
+    img.alt = a.label;
+    const label = document.createElement("span");
+    label.textContent = a.label;
+    card.append(img, label);
+    card.addEventListener("click", () => toggleAddition(a.id));
+    strip.appendChild(card);
+  }
+  document.getElementById("aiText").addEventListener("input", renderAIChoices);
+  document.getElementById("aiText").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); generateRelief(); }
+  });
+  document.getElementById("aiGenerateBtn").addEventListener("click", generateRelief);
+  renderAIChoices();
+  refreshUsage();
+}
+
+/** Pick or drop an addition; only one per group (e.g. one background) at a time. */
+function toggleAddition(id) {
+  if (AI.additions.includes(id)) {
+    AI.additions = AI.additions.filter((x) => x !== id);
+  } else {
+    const group = AI.options.additions.find((a) => a.id === id).group;
+    AI.additions = AI.additions.filter((x) => AI.options.additions.find((a) => a.id === x).group !== group);
+    AI.additions.push(id);
+  }
+  renderAIChoices();
+}
+
+/** Highlight the picked style/additions, show them as tags in the chatbox, and price the request. */
+function renderAIChoices() {
+  if (!AI.options) return;
+  document.querySelectorAll("#aiStyles .chip").forEach((b) => b.classList.toggle("on", b.dataset.id === AI.style));
+  document.querySelectorAll("#aiAdditions .addition-card").forEach((c) => c.classList.toggle("on", AI.additions.includes(c.dataset.id)));
+  const chips = document.getElementById("aiChips");
+  chips.innerHTML = "";
+  const style = AI.options.styles.find((s) => s.id === AI.style);
+  const st = document.createElement("span");
+  st.className = "tag style";
+  st.textContent = style.label;
+  chips.appendChild(st);
+  for (const id of AI.additions) {
+    const a = AI.options.additions.find((x) => x.id === id);
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.append(a.label);
+    const x = document.createElement("button");
+    x.textContent = "×";
+    x.title = "Remove";
+    x.addEventListener("click", () => toggleAddition(id));
+    tag.appendChild(x);
+    chips.appendChild(tag);
+  }
+  const typed = document.getElementById("aiText").value.trim().length > 0;
+  const n = typed ? AI.options.images_with_text : AI.options.images_default;
+  const usd = n * (typed ? AI.options.price_usd_variation : AI.options.price_usd_single);
+  const price = AI.options.provider === "mock" ? "free offline preview" : `~$${usd.toFixed(usd < 0.1 ? 3 : 2)}`;
+  const btn = document.getElementById("aiGenerateBtn");
+  btn.textContent = AI.busy ? "Generating…" : `Generate ${n === 1 ? "1 image" : n + " variations"} · ${price}`;
+  btn.disabled = AI.busy || !state.selectedCandidateId;
+}
+
+function addChatMessage(text, kind) {
+  const log = document.getElementById("aiChatLog");
+  const div = document.createElement("div");
+  div.className = "chat-msg " + kind;
+  div.textContent = text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function generateRelief() {
+  if (AI.busy || !state.selectedCandidateId || !AI.options) return;
+  const textEl = document.getElementById("aiText");
+  const text = textEl.value.trim();
+  const style = AI.options.styles.find((s) => s.id === AI.style).label;
+  const extras = AI.additions.map((id) => AI.options.additions.find((a) => a.id === id).label);
+  addChatMessage(`You: ${[style, ...extras].join(" + ")}${text ? " — “" + text + "”" : ""}`, "you");
+  AI.busy = true;
+  renderAIChoices();
+  setStatus("aiStatus", "Sculpting your relief… this takes a few seconds per image.");
+  try {
+    const res = await fetch("/api/relief", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: state.selectedCandidateId, style: AI.style, additions: AI.additions, text,
+                             fidelity: parseFloat(document.getElementById("aiFidelity").value) }),
+    });
+    if (!res.ok) {
+      let msg = await res.text();
+      try { msg = JSON.parse(msg).detail || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+    const out = await res.json();
+    addChatMessage(`${out.candidates.length === 1 ? "1 relief" : out.candidates.length + " reliefs"} added below — the first is on the ring.`, "ai");
+    textEl.value = "";
+    renderUsage(out.usage);
+    state.candidates = [...state.candidates, ...out.candidates];
+    renderGallery(state.candidates);
+    // a relief picture is lit sculpture, so its shape is best read with AI depth
+    const hs = document.getElementById("heightSource");
+    if (hs.value !== "depth") { hs.value = "depth"; hs.dispatchEvent(new Event("change")); }
+    const first = out.candidates[0];
+    await selectCandidate(first.candidate_id, document.querySelector(`#gallery img[data-candidate-id="${first.candidate_id}"]`));
+    setStatus("aiStatus", "");
+  } catch (err) {
+    console.error(err);
+    addChatMessage(`Couldn't generate: ${err.message}`, "err");
+    setStatus("aiStatus", "Generation failed.", true);
+  } finally {
+    AI.busy = false;
+    renderAIChoices();
+  }
+}
+
+async function refreshUsage() {
+  try {
+    renderUsage(await (await fetch("/api/usage")).json());
+  } catch (err) {
+    console.warn("usage unavailable", err);
+  }
+}
+
+function renderUsage(u) {
+  const el = document.getElementById("aiUsage");
+  if (!u) return;
+  if (u.provider === "mock") {
+    el.innerHTML = `AI relief: <b>offline preview</b> (no API key) · ${u.images} free images made`;
+    return;
+  }
+  const src = u.provider === "fal" ? "fal.ai" : "Stability AI";
+  const bal = u.balance_credits == null ? "" : ` · balance <b>${Math.round(u.balance_credits)}</b> credits`;
+  el.innerHTML = `${src} usage today: <b>${u.today.images}</b> images · <b>$${u.today.usd.toFixed(2)}</b>`
+    + ` · all time $${u.usd.toFixed(2)} (${u.images} images)${bal}`;
+  if (AI.options && AI.options.models) {
+    el.title = `Single images: ${AI.options.models.single}\n4 variations: ${AI.options.models.variations}`;
+  }
+}
+
 async function selectCandidate(candidateId, imgEl) {
   state.selectedCandidateId = candidateId;
   document.querySelectorAll("#gallery img").forEach((el) => el.classList.remove("selected"));
   if (imgEl) imgEl.classList.add("selected");
   document.getElementById("cropSection").hidden = false;
   document.getElementById("paramsSection").hidden = false;
+  document.getElementById("aiSection").hidden = false;
+  renderAIChoices();
   applyPresetDefaults(state.cfg);
   await loadCropperImage(candidateId);
   refreshFromBackend();
@@ -1271,6 +1451,7 @@ async function main() {
   updateMeshHeights();
 
   wireUI(cfg);
+  initAI();
 }
 
 main();

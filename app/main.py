@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import uuid
 from typing import Optional
 
 import cv2
@@ -11,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from app import background, config, enhance, prompts, storage
+from app import background, config, enhance, prompts, relief, relief_prompts, storage
 from app.imaging import cap_max_dimension, cover_fit_resize
 from app.processing import ProcessParams, process_image
 from app.providers import get_provider
@@ -41,6 +42,21 @@ class GenerateResponse(BaseModel):
     seed: Optional[int]
     candidates: list[CandidateOut]
     warnings: list[str] = []
+
+
+class ReliefRequest(BaseModel):
+    source_id: str                                   # the candidate to re-render (an upload or an earlier result)
+    style: str = relief_prompts.DEFAULT_STYLE
+    additions: list[str] = []                        # ids from relief_prompts.ADDITIONS, in the order picked
+    text: str = Field(default="", max_length=500)    # the user's own request; if given, 4 variations are made
+    fidelity: float = Field(default=config.RELIEF_FIDELITY_DEFAULT, ge=0.0, le=1.0)
+
+
+class ReliefResponse(BaseModel):
+    request_id: str
+    prompt: str
+    candidates: list[CandidateOut]
+    usage: dict
 
 
 class ProcessRequest(BaseModel):
@@ -193,6 +209,78 @@ def generate(req: GenerateRequest):
         ))
 
     return GenerateResponse(prompt=req.prompt, preset=req.preset, seed=req.seed, candidates=candidates, warnings=warnings)
+
+
+@app.get("/api/relief/options")
+def relief_options():
+    """Styles and additions for the "Design with AI" panel, plus the provider and its prices."""
+    try:
+        provider = relief.get_relief_provider()
+        price_single, price_variation = provider.price_usd(False), provider.price_usd(True)
+        models = {"single": provider.model_for(False), "variations": provider.model_for(True)} \
+            if hasattr(provider, "model_for") else None
+    except relief.ReliefError:
+        price_single = price_variation = 0.0
+        models = None
+    return {**relief_prompts.options(), "provider": config.RELIEF_PROVIDER, "models": models,
+            "price_usd_single": price_single, "price_usd_variation": price_variation,
+            "images_with_text": config.RELIEF_IMAGES_WITH_TEXT, "images_default": config.RELIEF_IMAGES_DEFAULT,
+            "fidelity_default": config.RELIEF_FIDELITY_DEFAULT}
+
+
+@app.post("/api/relief", response_model=ReliefResponse)
+def generate_relief(req: ReliefRequest):
+    """
+    Re-render a candidate as a sculpted silver relief with an image model
+    (fal.ai editing models, Stability Structure Control, or the offline
+    stand-in -- see app/relief.py), from the locked base prompt + style +
+    additions + the user's text. A typed
+    request makes RELIEF_IMAGES_WITH_TEXT variations; presets alone make one.
+    Each result is stored as a new candidate, so every slider and the 3D
+    preview work on it; its meta records how it was made and what it cost.
+    """
+    src = storage.design_dir(req.source_id) / "candidate_full.png"
+    if not src.exists():
+        raise HTTPException(404, f"Unknown candidate '{req.source_id}'")
+    if req.style not in relief_prompts.STYLES:
+        raise HTTPException(400, f"Unknown style '{req.style}'")
+    rgb = cv2.cvtColor(cv2.imread(str(src), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+    n = config.RELIEF_IMAGES_WITH_TEXT if req.text.strip() else config.RELIEF_IMAGES_DEFAULT
+    try:
+        provider = relief.get_relief_provider()
+        prompt, negative = relief_prompts.build_relief_prompt(
+            req.style, req.additions, req.text, instruction=provider.instruction, fidelity=req.fidelity)
+        images = relief.generate_many(provider, rgb, prompt, negative, req.fidelity, n)
+    except relief.ReliefError as err:
+        raise HTTPException(502, str(err))
+
+    request_id = uuid.uuid4().hex
+    out = []
+    for img in images:
+        full = cap_max_dimension(img.rgb, config.MAX_FULL_IMAGE_DIM_PX)
+        design_id, d = storage.new_design_dir()
+        storage.save_rgb_png(d / "candidate_full.png", full)
+        storage.save_rgb_png(d / "thumbnail.png", storage.make_thumbnail(full))
+        storage.write_json(d / "meta.json", {
+            "design_id": design_id, "source": "relief", "parent": req.source_id, "request_id": request_id,
+            "prompt": req.text, "style": req.style, "additions": req.additions, "fidelity": req.fidelity,
+            "full_prompt": prompt, "negative_prompt": negative, "seed": img.seed,
+            "provider": provider.name, "model": img.model,
+            "credits": img.credits, "usd": img.usd, "preset": None,
+        })
+        relief.log_usage(provider.name, img, design_id, request_id)
+        out.append(CandidateOut(candidate_id=design_id, thumbnail_url=f"/api/designs/{design_id}/thumbnail.png"))
+    return ReliefResponse(request_id=request_id, prompt=prompt, candidates=out, usage=relief.usage_summary(provider))
+
+
+@app.get("/api/usage")
+def get_usage():
+    """AI generation used so far: images, credits and dollars (all time and today), plus the account balance."""
+    try:
+        provider = relief.get_relief_provider()
+    except relief.ReliefError:
+        provider = None
+    return relief.usage_summary(provider)
 
 
 @app.post("/api/upload", response_model=CandidateOut)

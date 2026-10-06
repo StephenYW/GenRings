@@ -11,3 +11,7 @@ data/designs/*
 # tools/prepare_rings.py (~570MB). catalog.json and relief.json are kept.
 3D Models/Rings STL/
 static/rings/**/*.glb
+
+# AI generation usage ledger (local)
+data/usage.jsonl
+.env.backup

@@ -256,6 +256,46 @@ with its full range of detail. (Invert, which runs first, flips the subject's ow
 the background stays flat.) Swap in
 `birefnet-general` (~1 GB) for finer edges on hair and fur.
 
+### Design with AI (relief generation)
+
+Once an image is selected, the **Design with AI** section re-sculpts it as a polished silver
+bas-relief with Stable Diffusion, staying close to the original by default:
+
+- **Style** chips (classic coin, deep sculpt, engraved, minimal, art deco) and a scrollable
+  **Add to the design** gallery of options, each with a placeholder image
+  (`static/relief/<id>.png`, drawn by `tools/make_relief_thumbs.py`): no background (first),
+  background textures (stippled, brushed, sunburst, guilloché, hammered, stars), shading
+  (deep, soft), an outline, and borders (beaded, laurel). Only one option per group applies
+  (e.g. one background). Picked options show as highlighted tags in the chatbox.
+- **Chatbox:** type your own request ("my dog as a pirate"). A typed request makes **4
+  variations**; style and options alone make **1 image**. Results are added to the
+  candidates (the first goes on the ring) and the height source switches to AI depth, since
+  a relief picture is lit sculpture. Generating from a result iterates on it.
+- **Faithfulness** slider: the Structure Control strength (default 0.8, close to the source).
+- **Usage** line at the top of the panel: images and dollars today and all time (plus the
+  balance on Stability). Every image is logged to `data/usage.jsonl` with its model and cost.
+
+The prompt is layered (`app/relief_prompts.py`): a locked base (single-material silver
+bas-relief, frontal soft lighting, smooth castable forms, no colour or text, faithful to the
+source) + the style + the options + your text, with a fixed negative prompt. Styles and
+options are data in that file: add an entry (and rerun the thumbnail script) to add one.
+
+Generation (`app/relief.py`) uses, in order of preference:
+
+- **fal.ai** (`FAL_KEY` in `.env`): instruction-following image-editing models. Single images
+  use `FAL_MODEL` (default FLUX.1 Kontext [pro], ~$0.04), the 4-variation requests the
+  cheaper `FAL_MODEL_VARIATIONS` (default Kontext [dev], ~$0.025). Qwen Image Edit (Plus) and
+  FLUX.2 edit also work. The prompt is phrased as an instruction ("Transform this image
+  into …"), with the faithfulness slider spelled out in words, since these models have no
+  structure-strength setting. The source goes up as a ~1 MP JPEG data URI; one image per
+  call, requests in parallel. Costs are fal's list prices per model (`fal_price_usd`).
+- **Stability AI** (`STABILITY_API_KEY`, used when there's no fal key): the Structure Control
+  endpoint, where the slider is the control strength; 5 credits ($0.05) per image.
+- Otherwise a free offline stand-in, so the flow still works.
+
+`RELIEF_PROVIDER` (fal / stability / mock) overrides the choice. Endpoints: `GET /api/relief/options`, `POST /api/relief`
+(`source_id`, `style`, `additions`, `text`, `fidelity`), `GET /api/usage`.
+
 ### Image enhancement
 
 Ring-agnostic tools under **Image enhancement** in the panel. They live in

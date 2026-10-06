@@ -135,6 +135,30 @@ OPENAI_IMAGE_QUALITY = os.environ.get("OPENAI_IMAGE_QUALITY", "medium")  # low |
 # quality, then cover-fit resized down to the face aspect ratio.
 CANDIDATE_GEN_LONG_EDGE_PX = 1024
 
+# --- AI relief generation (image -> sculpted relief, app/relief.py) ------------
+# "fal": instruction-following image-editing models (FLUX Kontext, Qwen Image
+# Edit, FLUX.2) on fal.ai, used when FAL_KEY is set. "stability": Stable
+# Diffusion via Stability AI's Structure Control endpoint, when only
+# STABILITY_API_KEY is set. Otherwise a free offline stand-in ("mock").
+FAL_KEY = os.environ.get("FAL_KEY", "")
+STABILITY_API_KEY = os.environ.get("STABILITY_API_KEY", "")
+# "fal" (preferred), "stability", or "mock"; picked from whichever key is set unless given
+RELIEF_PROVIDER = os.environ.get(
+    "RELIEF_PROVIDER", "fal" if FAL_KEY else "stability" if STABILITY_API_KEY else "mock").lower()
+# fal.ai image-editing models (https://fal.ai/models): one for single images, a
+# cheaper one for the 4-variation requests. Any of: fal-ai/flux-pro/kontext,
+# fal-ai/flux-kontext/dev, fal-ai/qwen-image-edit, fal-ai/qwen-image-edit-plus,
+# fal-ai/flux-2/edit, fal-ai/flux-2-pro/edit.
+FAL_MODEL = os.environ.get("FAL_MODEL", "fal-ai/flux-pro/kontext")
+FAL_MODEL_VARIATIONS = os.environ.get("FAL_MODEL_VARIATIONS", "fal-ai/flux-kontext/dev")
+STABILITY_API_BASE = os.environ.get("STABILITY_API_BASE", "https://api.stability.ai")
+STABILITY_CREDITS_PER_IMAGE = float(os.environ.get("STABILITY_CREDITS_PER_IMAGE", "5"))  # Structure Control
+STABILITY_USD_PER_CREDIT = float(os.environ.get("STABILITY_USD_PER_CREDIT", "0.01"))
+RELIEF_IMAGES_WITH_TEXT = 4     # a typed request explores: 4 variations
+RELIEF_IMAGES_DEFAULT = 1       # presets only: 1 image
+RELIEF_FIDELITY_DEFAULT = 0.8   # control strength: how closely the result keeps the source's structure (0..1)
+USAGE_LOG = Path(__file__).resolve().parent.parent / "data" / "usage.jsonl"
+
 # --- Report thresholds ---------------------------------------------------
 COVERAGE_LOW_WARN_PERCENT = 2.0
 COVERAGE_HIGH_WARN_PERCENT = 85.0

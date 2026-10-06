@@ -18,6 +18,7 @@
   <div id="app">
     <aside id="panel">
       <h1>Ring Face Relief Designer</h1>
+      <div id="aiUsage" class="usage" title="AI image generation used so far">AI usage: loading…</div>
 
       <section>
         <label for="ringShape">Ring shape</label>
@@ -57,6 +58,24 @@
       <section>
         <label>Candidates</label>
         <div id="gallery" class="gallery"></div>
+      </section>
+
+      <section id="aiSection" hidden>
+        <label>Design with AI</label>
+        <p class="hint">Re-sculpts the selected image as a silver relief, staying close to it. Pick a style and extras, and/or describe a change.</p>
+        <label>Style</label>
+        <div id="aiStyles" class="chip-row"></div>
+        <label>Add to the design</label>
+        <div id="aiAdditions" class="addition-strip"></div>
+        <div class="chatbox">
+          <div id="aiChatLog" class="chat-log"></div>
+          <div id="aiChips" class="chat-chips"></div>
+          <textarea id="aiText" rows="2" maxlength="500" placeholder="Describe a change, e.g. &quot;my dog as a pirate&quot; (makes 4 options)"></textarea>
+        </div>
+        <label>Faithfulness to the original <span id="aiFidelityVal"></span></label>
+        <input type="range" id="aiFidelity" min="0.3" max="0.95" step="0.05" value="0.8" />
+        <button id="aiGenerateBtn">Generate</button>
+        <div id="aiStatus" class="status"></div>
       </section>
 
       <section id="cropSection" hidden>
@@ -151,6 +170,6 @@
     </main>
   </div>
 
-  <script type="module" src="/main.js?v=hardedge1"></script>
+  <script type="module" src="/main.js?v=relief2"></script>
 </body>
 </html>
