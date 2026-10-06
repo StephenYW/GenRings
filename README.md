@@ -1,7 +1,7 @@
 # Ring Face Relief Designer (MVP)
 
 Type a natural-language description of a design, get a manufacturable raised-relief
-heightmap for a fixed, flat signet ring face, and preview it in 3D as polished metal.
+heightmap for the top of a signet ring head, and preview it in 3D as polished metal.
 
 An AI image model (OpenAI's `gpt-image-2.5-flare`, or a built-in offline mock) only ever
 produces a **2D image**. All geometry, manufacturing rules (minimum feature size, edge
@@ -11,10 +11,13 @@ margins, quantization), and the weight/volume estimate are deterministic code in
 Each click of "Generate" makes exactly **one** image (one billed API call) and adds it to
 the gallery — there's no hidden batching. Click it again to add another for comparison.
 
-The 3D preview renders the face attached to a small signet ring band so its real-world
-scale is obvious — the engraved area is genuinely small (14mm x 12mm by default), and the
-minimum-feature/edge-margin rules exist specifically because fine detail doesn't survive
-manufacturing at that size. Once you pick a candidate, drag/zoom a crop box over the full
+The 3D preview shows real signet ring models from a library of 10 shapes in UK sizes H–Z
+(pick one from the menu), and applies the design to two of them: **S Square**, over its
+flat top (about 13.1mm x 13.4mm at the default 8°, adjustable with a slider), and **S
+Square (ridged)**, over the recessed floor inside its ridge (11.9mm x 12.0mm). Sizes come
+from `static/rings/relief.json`.
+The minimum-feature rules exist because fine detail doesn't survive manufacturing at that
+size. Once you pick a candidate, drag/zoom a crop box over the full
 source image to choose exactly what lands on the face — see "Crop, pan & zoom" below.
 
 ## Quick start
@@ -25,6 +28,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env   # defaults to IMAGE_PROVIDER=mock, no API key needed
+
+python tools/prepare_rings.py   # once: converts the ring library (see "Ring library")
 
 uvicorn app.main:app --reload --port 8420
 ```
@@ -64,18 +69,97 @@ supported size is closest to the face's aspect ratio, and the existing cover-fit
 step in `/api/generate` crops it to the exact aspect ratio afterwards. The `seed` field
 in `/api/generate` is accepted but has no effect with this provider.
 
-## Changing the ring face size / resolution
+## Ring library
 
-Everything is in `app/config.py` — e.g. to make the face 16mm x 10mm at 60px/mm:
+The ring models live in `3D Models/Rings STL/<Shape>/<Size>_<Shape>.stl` (not committed,
+1.5GB): 10 shapes — Circle, Oval, Square, Rectangle and Thin rectangle, each plain or
+ridged — in UK sizes H–Z (inner diameter 14.7mm to 22.0mm), all clean watertight meshes in
+millimetres. `tools/prepare_rings.py` (run it with the project venv; about a minute)
+converts them for the viewer:
 
-```python
-FACE_WIDTH_MM = 16.0
-FACE_HEIGHT_MM = 10.0
-PX_PER_MM = 60
-```
+- `static/rings/<Shape>/<Size>.glb` — one mesh per ring, rotated to the viewer's axes
+  (up = +Y, finger hole along Z). Not committed (~570MB); rerun the script to rebuild.
+- `static/rings/catalog.json` — every shape and size with its measured inner diameter,
+  which the viewer's ring menu (Shape / Ridged / Size) is built from.
+- `static/rings/relief.json` — the design rings' design areas, one entry per ring
+  (`rings`, keyed "Shape/Size", each with a `mode`), plus the `default` ring.
 
-The heightmap resolution, edge-margin masking, and 3D viewer all derive from these
-constants automatically. No other code changes needed.
+Every ring gets the same polished silver (see "Metal look").
+
+Each run of the script stamps a build `version` into `catalog.json` and `relief.json`,
+and the viewer requests models as `<Size>.glb?v=<version>` (and the JSON uncached), so
+a browser can't pair a cached model from an older build with newer design-area data.
+If a design ring's model still doesn't match its data (vertex count), the viewer shows
+an error rather than applying the design to the wrong vertices.
+
+Until a design is picked, each design ring shows a placeholder fitted to its design area:
+concentric copies of the area's outline, the outermost filling it to the edge (on the
+ridged ring, right up to the ridge walls).
+
+### Where the design goes
+
+Designs go on the rings listed in `RELIEF_RINGS` in the script, each with its own way of
+finding the design area. Each `/api/process` request says which ring the heightmap is
+for (`relief_ring`), and the backend sizes it to that ring's area
+(`config.face_geometry`). Switching between design rings in the viewer re-makes the
+heightmap at the new size.
+
+**S Square (ridged) — "recess".** The design fills the recessed floor inside the ridge:
+the faces connected to the centre of the top that tilt less than `RECESS_MAX_TILT_DEG`
+(60°), which takes in the flat floor and the small fillet where it meets the ridge's
+vertical inner wall, so it uses all the space inside the ridge (11.94mm x 11.97mm). The
+floor and the ridge's inner wall are refined twice and come first in the GLB. The viewer
+moves the floor straight up/down by the heightmap (top-down UVs over its box), so its
+edge stays directly under the wall, and lifts the design so its **highest point is
+always level with the top of the ridge's inner wall** (`wall_top_y_mm` − `floor_y_mm`
+in `relief.json`, 0.96mm): each point sits at wall top − (design top − h) x relief
+scale x exaggeration. So at any exaggeration the peaks stay flush with the ridge and
+only what's below them deepens. Each wall vertex carries `_wall` = (the floor-edge
+vertex below it, how far up the wall it is), and the viewer stretches the wall so its
+foot follows that floor edge and its top stays at the ridge: when the design sinks the
+floor (e.g. dark edges with the preview exaggeration up), the wall reaches down to meet
+it instead of floating. There is no band transition outside the ridge.
+
+The **Ridge wall** slider (shown on this ring; 0–0.6mm, default 0.3mm) slides the ridge's
+inner wall outward: a thinner rim and a bigger floor for the design (at 0.3mm the rim goes
+from 1.22mm to 0.92mm thick and the floor from 11.94mm to 12.54mm across). The mesh is
+never cut or remeshed: the prep script gives each point on top of the head near the floor's
+edge a signed distance to that edge and an outward direction (`_ridge`, from a smoothed
+signed-distance map of the floor's footprint), and the viewer (`ridgeShiftAt`) slides
+points outward along it — rigidly for the wall and its fillets, fading smoothly to nothing
+across the floor (which stretches) and the ridge's top and outer side (which compress), so
+the ring's outside is unchanged. Points never pass one another, so no triangle flips
+(checked up to 0.6mm; it starts to fold past ~0.7mm). The design area, heightmap
+(`ridge_shift_mm` on `/api/process`) and crop box grow with the floor.
+
+**S Square — "tilt".** The design goes on its flat top: the triangles visible from straight above (a top-down
+z-buffer) that tilt less than an angle you set live with the **Design area** slider under
+the ring menu (0.5°–30°, default `DEFAULT_TILT_DEG` = 8°). Lower keeps the design on the
+flattest part of the top; higher spreads it onto the rounded edge. The area's footprint
+from above sets the heightmap's size and the crop box's aspect ratio (about 13.1mm x
+13.4mm at 8°). The design is never clipped to that outline. The slider only shows for the
+relief ring.
+
+So the viewer can change the angle without a rebuild, the script prepares everything any
+angle up to `TILT_MAX_DEG` (30°) could need:
+
+- the "zone" — the top faces up to 30° — refined twice (each pass splits every triangle
+  in four, down to ~0.04mm edges), splitting the neighbouring triangles to match so there
+  are no cracks. In the GLB the zone's faces and vertices come first;
+- `relief.json`'s `tilt_table`: for every 0.5°, the area's bounding box seen from above
+  and its outline. The backend sizes the heightmap from it (`face_tilt_deg` on
+  `/api/process`, `config.face_geometry`), and the viewer maps its top-down UVs onto the
+  same box (u along X, v along Z, image row 0 at -Z).
+
+When the slider moves, the viewer (`computeDesignArea` in `static/main.js`) takes the top
+faces tilting less than the angle as the design area. On release, it asks the backend for
+a heightmap of the new size; while dragging, the current heightmap is stretched to the new
+area.
+
+The viewer (`displaceFace`) pushes each design-area vertex out along its normal (straight
+up) by the heightmap. Nothing outside the area moves: the rounded edge and band stay
+exactly as the source ring, and the design ends at the area's edge with a hard edge. Other rings show without a design, and the menu says so.
+The STL export is still the plain rectangular relief slab.
 
 ## How it works
 
@@ -87,17 +171,20 @@ constants automatically. No other code changes needed.
 2. **Process** (`POST /api/process`, pure functions in `app/processing.py`): grayscale →
    optional invert/gamma/contrast → Gaussian blur → normalize → quantize to N levels →
    enforce minimum feature size (morphological open/close + small-component removal) →
-   feathered edge margin → scale to the chosen relief height → 16-bit heightmap + 8-bit
+   scale to the chosen relief height → 16-bit heightmap + 8-bit
    preview + a manufacturability report (coverage %, relief volume, estimated silver
    weight, warnings).
 3. Moving a slider re-runs step 2 against the **cached** candidate image — the image
    model is never called again after the initial generation.
-4. The frontend (`static/main.js`, Three.js, no build step) samples the 8-bit preview
-   into a ~400x340 vertex grid, displaces a plane, and recomputes normals — polished
-   with `MeshStandardMaterial` (metalness 1, roughness 0.08) under `RoomEnvironment`
-   lighting. The exaggeration slider only scales the *displayed* mesh; exports always
-   use the true (max 0.4mm) relief height. The face plate sits on a stylized torus
-   band (see "The 3D ring preview" below) so its small scale reads clearly.
+4. The frontend (`static/main.js`, Three.js, no build step) applies the 8-bit preview
+   to the relief ring (see "Where the design goes") and recomputes normals — polished
+   with `MeshStandardMaterial` (metalness 1, roughness 0.05) in a photo-studio HDRI
+   (see "Metal look" below). The exaggeration slider only changes the *displayed* mesh, and grows the
+   design downwards: its highest point stays at its true height and everything below
+   sinks `exaggeration` times deeper (height = top + (h − top) × exaggeration), so it
+   deepens into the ring rather than rising out of it (on the ridged ring it stays below
+   the ridge);
+   exports always use the true (max 0.4mm) relief height.
 
 ### Crop, pan & zoom
 
@@ -116,14 +203,6 @@ fresh against the cached full image every time (`app/imaging.py::cover_fit_resiz
 adjusting them never re-calls the image model, and the on-screen crop box is computed
 with the exact same math as the backend (`computeCropGeometry` in `main.js` mirrors
 `cover_fit_resize` in Python) so what you see is what gets cropped.
-
-### The 3D ring preview
-
-The viewer attaches the face to a torus band (`RING_DIAMETER_MM` = 18mm, a plausible
-finger size) purely so the face's real scale is obvious next to something recognizably
-ring-sized — **this is not a manufacturing model of the shank.** The exported heightmap
-and STL only ever describe the flat face; the manufacturer determines the actual
-band/shank/finger-size geometry separately and fuses or engraves the face pattern onto it.
 
 ### Style presets
 
@@ -162,6 +241,94 @@ the image model: OpenAI's image models are actually quite good at rendering legi
 text it draws gets flattened/quantized/min-feature-filtered along with everything else and
 reliably comes out as illegible blobs once converted to relief — so the prompt templates
 explicitly ask for none, and no attempt is made to strip or repair it if it appears anyway.
+
+### Removing the background
+
+The **Remove background** checkbox keeps only the image's main subject, on either design
+ring. A segmentation model (rembg, `BG_REMOVAL_MODEL` in `app/config.py`, default
+`isnet-general-use`, ~180 MB, downloaded once to `~/.rembg` and run locally on the CPU in
+about a second) finds the subject in the candidate's full image; the mask is cached as
+`subject_mask.png` next to it, so crop/zoom/pan and slider changes never re-run it. On each
+`/api/process` with `remove_background`, the mask gets the same crop and flips as the image,
+then `apply_subject_mask` flattens the background to zero and re-stretches the subject's
+own tones to `SUBJECT_BASE_LEVEL`..1 (0.2..1), so the subject stands on a raised plateau
+with its full range of detail. (Invert, which runs first, flips the subject's own tones;
+the background stays flat.) Swap in
+`birefnet-general` (~1 GB) for finer edges on hair and fur.
+
+### Design with AI (relief generation)
+
+Once an image is selected, the **Design with AI** section re-sculpts it as a polished silver
+bas-relief with Stable Diffusion, staying close to the original by default:
+
+- **Style** chips (classic coin, deep sculpt, engraved, minimal, art deco) and a scrollable
+  **Add to the design** gallery of options, each with a placeholder image
+  (`static/relief/<id>.png`, drawn by `tools/make_relief_thumbs.py`): no background (first),
+  background textures (stippled, brushed, sunburst, guilloché, hammered, stars), shading
+  (deep, soft), an outline, and borders (beaded, laurel). Only one option per group applies
+  (e.g. one background). Picked options show as highlighted tags in the chatbox.
+- **Chatbox:** type your own request ("my dog as a pirate"). A typed request makes **4
+  variations**; style and options alone make **1 image**. Results are added to the
+  candidates (the first goes on the ring) and the height source switches to AI depth, since
+  a relief picture is lit sculpture. Generating from a result iterates on it.
+- **Faithfulness** slider: the Structure Control strength (default 0.8, close to the source).
+- **Usage** line at the top of the panel: images and dollars today and all time (plus the
+  balance on Stability). Every image is logged to `data/usage.jsonl` with its model and cost.
+
+The prompt is layered (`app/relief_prompts.py`): a locked base (single-material silver
+bas-relief, frontal soft lighting, smooth castable forms, no colour or text, faithful to the
+source) + the style + the options + your text, with a fixed negative prompt. Styles and
+options are data in that file: add an entry (and rerun the thumbnail script) to add one.
+
+Generation (`app/relief.py`) uses, in order of preference:
+
+- **fal.ai** (`FAL_KEY` in `.env`): instruction-following image-editing models. Single images
+  use `FAL_MODEL` (default FLUX.1 Kontext [pro], ~$0.04), the 4-variation requests the
+  cheaper `FAL_MODEL_VARIATIONS` (default Kontext [dev], ~$0.025). Qwen Image Edit (Plus) and
+  FLUX.2 edit also work. The prompt is phrased as an instruction ("Transform this image
+  into …"), with the faithfulness slider spelled out in words, since these models have no
+  structure-strength setting. The source goes up as a ~1 MP JPEG data URI; one image per
+  call, requests in parallel. Costs are fal's list prices per model (`fal_price_usd`).
+- **Stability AI** (`STABILITY_API_KEY`, used when there's no fal key): the Structure Control
+  endpoint, where the slider is the control strength; 5 credits ($0.05) per image.
+- Otherwise a free offline stand-in, so the flow still works.
+
+`RELIEF_PROVIDER` (fal / stability / mock) overrides the choice. Endpoints: `GET /api/relief/options`, `POST /api/relief`
+(`source_id`, `style`, `additions`, `text`, `fidelity`), `GET /api/usage`.
+
+### Image enhancement
+
+Ring-agnostic tools under **Image enhancement** in the panel. They live in
+`app/processing.py` (pure functions on heightmap-sized arrays) and `app/enhance.py` (AI
+models), know nothing about which ring the design is for, and apply to every design ring,
+so a new ring style gets them automatically. `process_image` runs them in this order:
+
+1. **Clean up image** (`denoise`, on by default): two edge-preserving bilateral passes,
+   so grain and compression noise don't become bumpy metal.
+2. **AI upscale 2x** (`upscale`): Real-ESRGAN x2 on the full image, in tiles, cached as
+   `upscaled.png` (~10 s on first use per image). Sharper source, smoother edges.
+3. **Height from: AI depth** (`height_source = "depth"`): Depth Anything V2 Small
+   estimates the photo's 3D shape (cached as `depth.png`, ~0.5 s), so height follows form
+   (a nose, a cheek) instead of brightness (where dark hair or shadows would sink).
+   **Fine detail** (`depth_detail`) blends the photo's texture finer than 0.4mm back on top.
+4. **Bas-relief compression** (`bas_relief`): as for coins and medals. Gradients steeper
+   than 3x the average are compressed in the gradient domain and the heightfield is
+   rebuilt with a Poisson solve; then shapes broader than 1.5mm shrink most, mid-scale
+   ones less, and detail under 0.3mm keeps its full height (`BAS_RELIEF_SCALES_MM`).
+5. **Remove background** (see below).
+6. **Engraved outlines** (`outline_strength`): XDoG edges of the image cut as grooves, and
+   **Hatching** (`hatch_strength`, `hatch_spacing_mm`, `hatch_angle_deg`): parallel lines
+   whose width follows the image's darkness, banknote style. Both cut at most
+   `ENGRAVE_MAX_DEPTH` (half the relief height).
+7. Quantize and minimum feature size, as before.
+8. **Smooth edges** (`smooth_mm`, 0.04mm by default): a final light blur that turns
+   stair-stepped walls between heights into short slopes, so edges in the metal look
+   smooth rather than jagged.
+
+The two models (ONNX, run on the CPU with onnxruntime, no PyTorch) download once to
+`~/.cache/silversignal/models` (about 100MB + 67MB; `SILVERSIGNAL_MODELS_DIR` overrides).
+The UI defaults to brightness with cleanup and edge smoothing on; for photos, try AI depth
+with fine detail ~0.5 and bas-relief ~0.6.
 
 ### Uploading your own photo/artwork
 
@@ -204,9 +371,9 @@ processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `mod
   request, by design, to keep cost predictable), rather than a batch id you then index
   into. This is what makes "re-processing never re-calls the image model" simple: the
   candidate image is just sitting in that folder already.
-- The edge-margin **feather is intentionally continuous** even when `levels >= 2`
-  (tiered/quantized mode) — the spec asks for a 0.3mm feather, which is inherently a
-  ramp, not a hard cutoff. Only the *interior* (inset past margin+feather) is guaranteed
+- There is no edge margin by default (`EDGE_MARGIN_MM = 0`): the design runs right to the
+  face's edge and is never clipped to its outline. If a margin is configured, its feather
+  is intentionally continuous even when `levels >= 2` — only the interior is guaranteed
   to have exactly N discrete levels; this is covered by `tests/test_processing.py`.
 - Generated images are requested at the face aspect ratio, snapped to whichever of
   OpenAI's fixed output sizes (1024x1024 / 1536x1024 / 1024x1536) is closest, and kept
@@ -216,18 +383,16 @@ processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `mod
 - The crop box's default (`zoom=1, offset=(0,0)`) reproduces the old fixed
   cover-fit-and-crop behavior exactly, so an unadjusted candidate processes identically
   to before this feature existed.
-- The 3D ring band (torus, `RING_DIAMETER_MM`/`RING_BAND_THICKNESS_MM`) is a
-  proportional visual aid only — picked to make the face's small scale legible, not
-  derived from any real ring-sizing standard or sent to a manufacturer.
 - No path traversal protection was needed beyond validating design ids are the uuid4 hex
   strings we generate ourselves (`storage._safe_id`), since there's no auth/multi-tenant
   concern in this MVP.
-- The 3D viewer's bezel (rim width, slab thickness) is a fixed cosmetic choice (1.6mm)
-  to suggest a ring band visually — it's independent of the STL export's
-  `BASE_THICKNESS_MM` (1.0mm) constant, which is what actually gets exported.
-- Weight/volume in the report account for the **relief only** (matches the spec), not the
-  base plate — a real ring's total silver weight would also include the plain base slab
-  and shank, which are out of scope for this MVP.
+- The report shows the **total ring weight** in 935 silver (93.5% silver, the rest copper:
+  `SILVER_DENSITY_G_CM3` = 10.37 g/cm³ in `app/config.py`). The viewer computes it from the
+  volume of the ring on show (its mesh is watertight; signed-tetrahedron sum,
+  `meshVolume` in `static/main.js`) with the design applied at its true height — whatever
+  the preview exaggeration — including the raised floor and moved
+  ridge wall on Square (ridged). E.g. S Square with a small emblem is about 17.95 g. The
+  report also still gives the relief's own volume and weight (same density).
 
 ## Known limitations
 
@@ -238,5 +403,48 @@ processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `mod
   content. That's expected; it exists purely so the app/tests work with zero setup.
 - The STL export downsamples the heightmap grid for a manageable file size/face count;
   it's a preview-quality mesh, not a full-resolution manufacturing file.
-- The 3D ring band is a stylized proportional preview (see "The 3D ring preview" above),
-  not a CAD-accurate shank — only the face relief is ever exported.
+- Designs are applied to two rings (S Square and S Square ridged) so far; the other 188
+  rings show without one.
+- Only the face relief is ever exported (as a rectangular slab STL), not the ring it sits on.
+
+## Metal look
+
+The whole ring (body, face, relief) uses one shared sterling-silver material (`SILVER` in
+`static/main.js`), buffed to a near-mirror polish (roughness 0.05). Raise `SILVER.roughness`
+(0.15-0.3) for a satin finish.
+
+The ring's surroundings are a real photo-studio HDRI (`loadStudio`, settings in `STUDIO`):
+Poly Haven's "Monochrome Studio 02" (CC0), from `3D Models/monochrome_studio_02_4k.exr`
+(not committed, 77MB; download the 4K EXR from https://polyhaven.com/a/monochrome_studio_02),
+converted by `tools/prepare_skybox.py` (run it with the project venv after changing the
+source) into `static/env/studio_env.hdr`. It's both what the silver reflects (its strip
+softboxes and octabox give the highlights; its dark ceiling gives contrast) and the
+background, slightly blurred (`backgroundBlur`) as if the camera were focused on the ring.
+The script turns the panorama by `YAW_DEG` so the white seamless backdrop sits behind the
+ring from the starting camera; three.js r160 can't rotate an environment map at runtime.
+The HDRI loads in the background; until it arrives the viewer shows a plain light-gray
+background. `STUDIO.reflectionGain` scales how strongly the metal reflects the studio.
+
+The studio's own ceiling is dark, so an upward-facing face would mirror black. A hidden
+soft lightbox above the ring (`STUDIO.topLight`: size, position, brightness) fixes that. It
+sits on `REFLECTION_LAYER`, which the viewing camera never renders, so it only shows up in
+the metal. It glows from its centre and fades smoothly to black at its edges
+(`lightEdgeFade`), like a real softbox; a hard edge made tiny wobbles in the AI-generated
+ring mesh show up as jagged reflection outlines. The reflections are captured once from the
+ring's position (studio plus lightbox, ring hidden), so spinning the ring needs no recapture.
+
+Two things keep the design readable on polished silver, which has no shading of its own:
+
+- The top lightbox is graduated (`topLight.gradient`): bright at one end, dim at the other.
+  Each slope of the relief mirrors a different brightness, so the design reads as shading
+  rather than washing out to uniform white.
+- The face's recesses are darkened like an oxidized ("antiqued") signet ring (`PATINA`):
+  wherever the relief dips below its surroundings within `radiusMm`, the metal gets darker,
+  up to `darkness`. Crevices beside raised detail go dark while broad flat areas stay
+  polished. It's computed from the heightmap on every update and fades out near the rim so
+  the face meets the body without a line. Set `darkness` to 0 for a plain polished face.
+
+Viewer controls (`setupDragControls`): the camera starts turned slightly right
+(`CAMERA_YAW`). Dragging left/right spins the ring on the spot like a turntable (the camera
+and box stay put, so reflections sweep across the metal), dragging up/down tilts the camera
+over or under the ring (all the way round to its underside), and the mouse wheel zooms.

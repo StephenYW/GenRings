@@ -18,6 +18,26 @@
   <div id="app">
     <aside id="panel">
       <h1>Ring Face Relief Designer</h1>
+      <div id="aiUsage" class="usage" title="AI image generation used so far">AI usage: loading…</div>
+
+      <section>
+        <label for="ringShape">Ring shape</label>
+        <select id="ringShape"></select>
+        <label class="checkbox-row"><input type="checkbox" id="ringRidged" /> Ridged</label>
+        <label for="ringSize">Size (UK) — inner diameter</label>
+        <select id="ringSize"></select>
+        <p id="ringReliefNote" class="hint" hidden></p>
+        <div id="designTiltGroup" hidden>
+          <label for="designTilt">Design area: top tilting under <span id="designTiltVal"></span></label>
+          <input type="range" id="designTilt" min="0.5" max="30" step="0.5" value="8" />
+          <p class="hint">Lower keeps the design on the flattest part of the top; higher spreads it onto the rounded edge.</p>
+        </div>
+        <div id="ridgeGroup" hidden>
+          <label for="ridgeShift">Ridge wall: <span id="ridgeShiftVal"></span></label>
+          <input type="range" id="ridgeShift" min="0" max="0.6" step="0.01" value="0.3" />
+          <p class="hint">Slides the ridge's inner wall outward: a thinner rim, more room for the design.</p>
+        </div>
+      </section>
 
       <section>
         <label for="prompt">Design description</label>
@@ -40,6 +60,24 @@
         <div id="gallery" class="gallery"></div>
       </section>
 
+      <section id="aiSection" hidden>
+        <label>Design with AI</label>
+        <p class="hint">Re-sculpts the selected image as a silver relief, staying close to it. Pick a style and extras, and/or describe a change.</p>
+        <label>Style</label>
+        <div id="aiStyles" class="chip-row"></div>
+        <label>Add to the design</label>
+        <div id="aiAdditions" class="addition-strip"></div>
+        <div class="chatbox">
+          <div id="aiChatLog" class="chat-log"></div>
+          <div id="aiChips" class="chat-chips"></div>
+          <textarea id="aiText" rows="2" maxlength="500" placeholder="Describe a change, e.g. &quot;my dog as a pirate&quot; (makes 4 options)"></textarea>
+        </div>
+        <label>Faithfulness to the original <span id="aiFidelityVal"></span></label>
+        <input type="range" id="aiFidelity" min="0.3" max="0.95" step="0.05" value="0.8" />
+        <button id="aiGenerateBtn">Generate</button>
+        <div id="aiStatus" class="status"></div>
+      </section>
+
       <section id="cropSection" hidden>
         <label>Crop &amp; position on face</label>
         <p class="hint">Drag the box to choose what's centered on the ring face. Zoom to include more or less of the image.</p>
@@ -55,21 +93,62 @@
         <label>Relief height (mm) <span id="reliefHeightVal"></span></label>
         <input type="range" id="reliefHeight" min="0.1" max="0.4" step="0.01" value="0.25" />
 
-        <label>Levels (0 = continuous) <span id="levelsVal"></span></label>
-        <input type="range" id="levels" min="0" max="8" step="1" value="4" />
+        <label>Levels (0-1 = continuous) <span id="levelsVal"></span></label>
+        <input type="range" id="levels" min="0" max="8" step="1" value="1" />
 
         <label>Blur (mm) <span id="blurVal"></span></label>
-        <input type="range" id="blur" min="0" max="0.6" step="0.02" value="0" />
+        <input type="range" id="blur" min="0" max="0.6" step="0.02" value="0.02" />
 
         <label>Min feature size (mm) <span id="minFeatureVal"></span></label>
         <input type="range" id="minFeature" min="0.1" max="0.8" step="0.01" value="0.25" />
 
+        <label class="checkbox-row"><input type="checkbox" id="removeBg" /> Remove background (keep the main subject)</label>
+        <p class="hint">The subject becomes a raised design on a flat background. The first use downloads a ~180 MB model, so it can take a minute.</p>
         <label class="checkbox-row"><input type="checkbox" id="invert" /> Invert (raise background instead)</label>
+        <label class="checkbox-row"><input type="checkbox" id="flipH" /> Flip horizontally (mirror left-right)</label>
+        <label class="checkbox-row"><input type="checkbox" id="flipV" checked /> Flip vertically (upside down)</label>
+
+        <hr />
+        <label>Image enhancement</label>
+
+        <label for="heightSource">Height from</label>
+        <select id="heightSource">
+          <option value="brightness">Brightness</option>
+          <option value="depth">AI depth (the photo's 3D shape)</option>
+        </select>
+        <div id="depthDetailGroup" hidden>
+          <label>Fine detail <span id="depthDetailVal"></span></label>
+          <input type="range" id="depthDetail" min="0" max="1" step="0.05" value="0.5" />
+          <p class="hint">Blends the photo's texture (eyes, fur, hair) back onto the depth's form.</p>
+        </div>
+
+        <label>Bas-relief compression <span id="basReliefVal"></span></label>
+        <input type="range" id="basRelief" min="0" max="1" step="0.05" value="0" />
+        <p class="hint">Flattens big height differences and keeps fine detail, like a coin.</p>
+
+        <label class="checkbox-row"><input type="checkbox" id="denoise" checked /> Clean up image (remove grain and noise)</label>
+        <label class="checkbox-row"><input type="checkbox" id="upscale" /> AI upscale 2x (sharper source; the first run can take ~30 s)</label>
+        <label>Smooth edges (mm) <span id="smoothMmVal"></span></label>
+        <input type="range" id="smoothMm" min="0" max="0.15" step="0.01" value="0.04" />
+        <p class="hint">Softens steps between heights so edges in the metal come out smooth, not jagged.</p>
+
+        <label>Engraved outlines <span id="outlineStrengthVal"></span></label>
+        <input type="range" id="outlineStrength" min="0" max="1" step="0.05" value="0" />
+        <label>Hatching <span id="hatchStrengthVal"></span></label>
+        <input type="range" id="hatchStrength" min="0" max="1" step="0.05" value="0" />
+        <div id="hatchGroup" hidden>
+          <label>Hatch spacing (mm) <span id="hatchSpacingVal"></span></label>
+          <input type="range" id="hatchSpacing" min="0.3" max="1.2" step="0.05" value="0.6" />
+          <label>Hatch angle (&deg;) <span id="hatchAngleVal"></span></label>
+          <input type="range" id="hatchAngle" min="0" max="180" step="5" value="45" />
+        </div>
 
         <hr />
 
         <label>Preview exaggeration <span id="exaggerationVal"></span> <em>(display only)</em></label>
-        <input type="range" id="exaggeration" min="1" max="6" step="0.1" value="3" />
+        <p class="hint">Deepens the design downwards (its highest points stay at their true height), or raises the peaks from the base when exaggerating upward.</p>
+        <input type="range" id="exaggeration" min="1" max="6" step="0.1" value="1" />
+        <label class="checkbox-row"><input type="checkbox" id="exaggerateUp" /> Exaggerate upward (raise the peaks instead)</label>
 
         <div id="processStatus" class="status"></div>
       </section>
@@ -91,6 +170,6 @@
     </main>
   </div>
 
-  <script type="module" src="/main.js"></script>
+  <script type="module" src="/main.js?v=relief2"></script>
 </body>
 </html>

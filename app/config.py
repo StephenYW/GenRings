@@ -10,18 +10,63 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Ring face geometry ---------------------------------------------------
-FACE_WIDTH_MM = 14.0
-FACE_HEIGHT_MM = 12.0
+# Designs go on a few rings from the library ("design rings"), each over its
+# own design area: on S Square, the top tilting less than an angle the viewer
+# sets ("tilt"); on S SquareRidged, the recessed floor inside the ridge
+# ("recess"). Each area's size (the heightmap's size) and outline come from
+# static/rings/relief.json, written by tools/prepare_rings.py, so the backend
+# and 3D viewer can't drift apart. The fallback is only used if that file
+# hasn't been generated.
+import json
+
+_FACE_INFO_PATH = Path(__file__).resolve().parent.parent / "static" / "rings" / "relief.json"
+try:
+    _relief = json.loads(_FACE_INFO_PATH.read_text())
+except (OSError, ValueError):
+    _relief = {}
+RELIEF_RINGS = _relief.get("rings", {})           # "Shape/Size" -> that ring's design-area info
+DEFAULT_RELIEF_RING = _relief.get("default")
+_face_info = RELIEF_RINGS.get(DEFAULT_RELIEF_RING, {})
+
+# The default design area (the default ring's, at its default angle)
+FACE_WIDTH_MM = float(_face_info.get("face_width_mm", 14.0))
+FACE_HEIGHT_MM = float(_face_info.get("face_height_mm", 12.0))
+# Outline of the face in mm, centred on the bounding box (x, z); None if unknown.
+FACE_OUTLINE_MM = _face_info.get("outline_xz_mm")
+
+
+def face_geometry(ring=None, tilt_deg=None, ridge_shift_mm=None):
+    """(width_mm, height_mm, outline) of a design ring's design area. For a
+    "tilt" ring, at the nearest tabulated angle to tilt_deg (its default if
+    None). For a "recess" ring, with its ridge's inner wall slid outward by
+    ridge_shift_mm (the viewer's "ridge wall" slider), which widens the floor
+    by that much on every side. Unknown rings get the defaults."""
+    info = RELIEF_RINGS.get(ring or DEFAULT_RELIEF_RING)
+    if not info:
+        return FACE_WIDTH_MM, FACE_HEIGHT_MM, FACE_OUTLINE_MM
+    table = info.get("tilt_table")
+    if table:
+        deg = info.get("default_tilt_deg") if tilt_deg is None else tilt_deg
+        e = min(table, key=lambda t: abs(t["deg"] - deg))
+        return e["width_mm"], e["height_mm"], e["outline_xz_mm"]
+    w, h, outline = info["face_width_mm"], info["face_height_mm"], info.get("outline_xz_mm")
+    shift = max(0.0, float(ridge_shift_mm or 0.0))
+    if shift and outline:
+        sx, sz = (w + 2 * shift) / w, (h + 2 * shift) / h
+        outline = [[x * sx, z * sz] for x, z in outline]
+    return w + 2 * shift, h + 2 * shift, outline
 
 # --- Heightmap resolution ---------------------------------------------------
 PX_PER_MM = 50
-HEIGHTMAP_WIDTH_PX = int(round(FACE_WIDTH_MM * PX_PER_MM))   # 700
-HEIGHTMAP_HEIGHT_PX = int(round(FACE_HEIGHT_MM * PX_PER_MM))  # 600
+HEIGHTMAP_WIDTH_PX = int(round(FACE_WIDTH_MM * PX_PER_MM))   
+HEIGHTMAP_HEIGHT_PX = int(round(FACE_HEIGHT_MM * PX_PER_MM))  
 
 # --- Relief / manufacturing rules ---------------------------------------------------
 RELIEF_MAX_MM = 0.4
-EDGE_MARGIN_MM = 1.0
-EDGE_FEATHER_MM = 0.3
+# The texture runs right to the face's edge: the 3D viewer adds a wall from the
+# ring body's rim up to the displaced edge, so no fade-out is needed.
+EDGE_MARGIN_MM = 0.0
+EDGE_FEATHER_MM = 0.0
 MIN_FEATURE_MM = 0.25
 
 # A pixel counts as "raised" (for coverage/report/min-feature purposes) only
@@ -31,8 +76,26 @@ MIN_FEATURE_MM = 0.25
 # "raised" and wildly overstate coverage and edge-margin clipping.
 RAISED_THRESHOLD = 0.02
 
+# --- Background removal ---------------------------------------------------
+# rembg model used to find the main subject (see app/background.py).
+# "isnet-general-use" (~180 MB) is a good all-rounder; "birefnet-general"
+# (~1 GB) gives finer edges; "u2net" (~170 MB) is the classic default.
+BG_REMOVAL_MODEL = os.getenv("BG_REMOVAL_MODEL", "isnet-general-use")
+# With the background removed, the subject sits on a raised plateau: its
+# lowest point is this fraction of the full relief height above the
+# (flat, zero) background, so its silhouette always reads.
+SUBJECT_BASE_LEVEL = 0.2
+
+# --- Image enhancement (app/enhance.py, app/processing.py) -------------------
+DEPTH_INPUT_PX = 518            # depth model's working size (long side, multiple of 14)
+BAS_RELIEF_SCALES_MM = (1.5, 0.3)  # bas-relief: form broader than 1.5 mm squashed most, finer than 0.3 mm kept
+DEPTH_DETAIL_SCALE_MM = 0.4    # with depth: brightness detail finer than this is blended back on top
+ENGRAVE_MAX_DEPTH = 0.5         # outlines/hatching cut at most this fraction of the relief height
+
 # --- Material ---------------------------------------------------
-SILVER_DENSITY_G_CM3 = 10.49
+# 935 silver (93.5% silver, the rest copper): 1 / (0.935/10.49 + 0.065/8.96) g/cm3
+SILVER_ALLOY = "935"
+SILVER_DENSITY_G_CM3 = 10.37
 
 # --- STL export (stretch milestone) ---------------------------------------------------
 BASE_THICKNESS_MM = 1.0
@@ -71,6 +134,30 @@ OPENAI_IMAGE_QUALITY = os.environ.get("OPENAI_IMAGE_QUALITY", "medium")  # low |
 # Candidate images are generated somewhat larger than the heightmap for
 # quality, then cover-fit resized down to the face aspect ratio.
 CANDIDATE_GEN_LONG_EDGE_PX = 1024
+
+# --- AI relief generation (image -> sculpted relief, app/relief.py) ------------
+# "fal": instruction-following image-editing models (FLUX Kontext, Qwen Image
+# Edit, FLUX.2) on fal.ai, used when FAL_KEY is set. "stability": Stable
+# Diffusion via Stability AI's Structure Control endpoint, when only
+# STABILITY_API_KEY is set. Otherwise a free offline stand-in ("mock").
+FAL_KEY = os.environ.get("FAL_KEY", "")
+STABILITY_API_KEY = os.environ.get("STABILITY_API_KEY", "")
+# "fal" (preferred), "stability", or "mock"; picked from whichever key is set unless given
+RELIEF_PROVIDER = os.environ.get(
+    "RELIEF_PROVIDER", "fal" if FAL_KEY else "stability" if STABILITY_API_KEY else "mock").lower()
+# fal.ai image-editing models (https://fal.ai/models): one for single images, a
+# cheaper one for the 4-variation requests. Any of: fal-ai/flux-pro/kontext,
+# fal-ai/flux-kontext/dev, fal-ai/qwen-image-edit, fal-ai/qwen-image-edit-plus,
+# fal-ai/flux-2/edit, fal-ai/flux-2-pro/edit.
+FAL_MODEL = os.environ.get("FAL_MODEL", "fal-ai/flux-pro/kontext")
+FAL_MODEL_VARIATIONS = os.environ.get("FAL_MODEL_VARIATIONS", "fal-ai/flux-kontext/dev")
+STABILITY_API_BASE = os.environ.get("STABILITY_API_BASE", "https://api.stability.ai")
+STABILITY_CREDITS_PER_IMAGE = float(os.environ.get("STABILITY_CREDITS_PER_IMAGE", "5"))  # Structure Control
+STABILITY_USD_PER_CREDIT = float(os.environ.get("STABILITY_USD_PER_CREDIT", "0.01"))
+RELIEF_IMAGES_WITH_TEXT = 4     # a typed request explores: 4 variations
+RELIEF_IMAGES_DEFAULT = 1       # presets only: 1 image
+RELIEF_FIDELITY_DEFAULT = 0.8   # control strength: how closely the result keeps the source's structure (0..1)
+USAGE_LOG = Path(__file__).resolve().parent.parent / "data" / "usage.jsonl"
 
 # --- Report thresholds ---------------------------------------------------
 COVERAGE_LOW_WARN_PERCENT = 2.0

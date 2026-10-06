@@ -6,3 +6,12 @@ __pycache__/
 data/designs/*
 !data/designs/.gitkeep
 .DS_Store
+
+# Ring library: the source STLs (1.5GB) and the GLBs generated from them by
+# tools/prepare_rings.py (~570MB). catalog.json and relief.json are kept.
+3D Models/Rings STL/
+static/rings/**/*.glb
+
+# AI generation usage ledger (local)
+data/usage.jsonl
+.env.backup

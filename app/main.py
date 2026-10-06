@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import uuid
 from typing import Optional
 
 import cv2
@@ -11,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from app import config, prompts, storage
+from app import background, config, enhance, prompts, relief, relief_prompts, storage
 from app.imaging import cap_max_dimension, cover_fit_resize
 from app.processing import ProcessParams, process_image
 from app.providers import get_provider
@@ -43,6 +44,21 @@ class GenerateResponse(BaseModel):
     warnings: list[str] = []
 
 
+class ReliefRequest(BaseModel):
+    source_id: str                                   # the candidate to re-render (an upload or an earlier result)
+    style: str = relief_prompts.DEFAULT_STYLE
+    additions: list[str] = []                        # ids from relief_prompts.ADDITIONS, in the order picked
+    text: str = Field(default="", max_length=500)    # the user's own request; if given, 4 variations are made
+    fidelity: float = Field(default=config.RELIEF_FIDELITY_DEFAULT, ge=0.0, le=1.0)
+
+
+class ReliefResponse(BaseModel):
+    request_id: str
+    prompt: str
+    candidates: list[CandidateOut]
+    usage: dict
+
+
 class ProcessRequest(BaseModel):
     candidate_id: str
     invert: bool = False
@@ -52,12 +68,38 @@ class ProcessRequest(BaseModel):
     levels: int = 0
     min_feature_mm: float = config.MIN_FEATURE_MM
     relief_height_mm: float = 0.25
+    # Mirror the image left-right / top-bottom before it becomes the heightmap.
+    flip_h: bool = False
+    flip_v: bool = False
     # Which part of the full source image maps onto the face. zoom=1,
     # offset=(0,0) is the default centered cover-fit crop; the frontend
     # cropper lets a user adjust these without re-calling the image model.
     crop_zoom: float = Field(default=1.0, ge=config.CROP_ZOOM_MIN, le=config.CROP_ZOOM_MAX)
     crop_offset_x: float = Field(default=0.0, ge=-1.0, le=1.0)
     crop_offset_y: float = Field(default=0.0, ge=-1.0, le=1.0)
+    # Which design ring the heightmap is for ("Shape/Size", see relief.json;
+    # None = the default), and for a "tilt" ring the angle that sets its
+    # design area (the viewer's slider; None = its default).
+    relief_ring: Optional[str] = None
+    face_tilt_deg: Optional[float] = None
+    # For a "recess" ring: how far its ridge's inner wall is slid outward (mm),
+    # which widens the floor the design fills (the viewer's "ridge wall" slider).
+    ridge_shift_mm: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    # Keep only the image's main subject: the background becomes a flat field
+    # and the subject a raised plateau (see app/background.py).
+    remove_background: bool = False
+    # Image enhancement (see app/processing.py and app/enhance.py). Ring-agnostic:
+    # every design ring gets these.
+    height_source: str = Field(default="brightness", pattern="^(brightness|depth)$")  # depth: AI 3D shape
+    upscale: bool = False            # AI 2x super-resolution of the source (cached per candidate)
+    denoise: bool = False            # edge-preserving cleanup of the source
+    bas_relief: float = Field(default=0.0, ge=0.0, le=1.0)
+    depth_detail: float = Field(default=0.0, ge=0.0, le=1.0)
+    outline_strength: float = Field(default=0.0, ge=0.0, le=1.0)
+    hatch_strength: float = Field(default=0.0, ge=0.0, le=1.0)
+    hatch_spacing_mm: float = Field(default=0.6, ge=0.2, le=2.0)
+    hatch_angle_deg: float = Field(default=45.0, ge=0.0, le=180.0)
+    smooth_mm: float = Field(default=0.0, ge=0.0, le=0.3)
 
 
 class ReportOut(BaseModel):
@@ -87,6 +129,8 @@ def get_config():
         "heightmap_width_px": config.HEIGHTMAP_WIDTH_PX,
         "heightmap_height_px": config.HEIGHTMAP_HEIGHT_PX,
         "relief_max_mm": config.RELIEF_MAX_MM,
+        "silver_alloy": config.SILVER_ALLOY,
+        "silver_density_g_cm3": config.SILVER_DENSITY_G_CM3,
         "edge_margin_mm": config.EDGE_MARGIN_MM,
         "edge_feather_mm": config.EDGE_FEATHER_MM,
         "min_feature_mm": config.MIN_FEATURE_MM,
@@ -167,6 +211,78 @@ def generate(req: GenerateRequest):
     return GenerateResponse(prompt=req.prompt, preset=req.preset, seed=req.seed, candidates=candidates, warnings=warnings)
 
 
+@app.get("/api/relief/options")
+def relief_options():
+    """Styles and additions for the "Design with AI" panel, plus the provider and its prices."""
+    try:
+        provider = relief.get_relief_provider()
+        price_single, price_variation = provider.price_usd(False), provider.price_usd(True)
+        models = {"single": provider.model_for(False), "variations": provider.model_for(True)} \
+            if hasattr(provider, "model_for") else None
+    except relief.ReliefError:
+        price_single = price_variation = 0.0
+        models = None
+    return {**relief_prompts.options(), "provider": config.RELIEF_PROVIDER, "models": models,
+            "price_usd_single": price_single, "price_usd_variation": price_variation,
+            "images_with_text": config.RELIEF_IMAGES_WITH_TEXT, "images_default": config.RELIEF_IMAGES_DEFAULT,
+            "fidelity_default": config.RELIEF_FIDELITY_DEFAULT}
+
+
+@app.post("/api/relief", response_model=ReliefResponse)
+def generate_relief(req: ReliefRequest):
+    """
+    Re-render a candidate as a sculpted silver relief with an image model
+    (fal.ai editing models, Stability Structure Control, or the offline
+    stand-in -- see app/relief.py), from the locked base prompt + style +
+    additions + the user's text. A typed
+    request makes RELIEF_IMAGES_WITH_TEXT variations; presets alone make one.
+    Each result is stored as a new candidate, so every slider and the 3D
+    preview work on it; its meta records how it was made and what it cost.
+    """
+    src = storage.design_dir(req.source_id) / "candidate_full.png"
+    if not src.exists():
+        raise HTTPException(404, f"Unknown candidate '{req.source_id}'")
+    if req.style not in relief_prompts.STYLES:
+        raise HTTPException(400, f"Unknown style '{req.style}'")
+    rgb = cv2.cvtColor(cv2.imread(str(src), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+    n = config.RELIEF_IMAGES_WITH_TEXT if req.text.strip() else config.RELIEF_IMAGES_DEFAULT
+    try:
+        provider = relief.get_relief_provider()
+        prompt, negative = relief_prompts.build_relief_prompt(
+            req.style, req.additions, req.text, instruction=provider.instruction, fidelity=req.fidelity)
+        images = relief.generate_many(provider, rgb, prompt, negative, req.fidelity, n)
+    except relief.ReliefError as err:
+        raise HTTPException(502, str(err))
+
+    request_id = uuid.uuid4().hex
+    out = []
+    for img in images:
+        full = cap_max_dimension(img.rgb, config.MAX_FULL_IMAGE_DIM_PX)
+        design_id, d = storage.new_design_dir()
+        storage.save_rgb_png(d / "candidate_full.png", full)
+        storage.save_rgb_png(d / "thumbnail.png", storage.make_thumbnail(full))
+        storage.write_json(d / "meta.json", {
+            "design_id": design_id, "source": "relief", "parent": req.source_id, "request_id": request_id,
+            "prompt": req.text, "style": req.style, "additions": req.additions, "fidelity": req.fidelity,
+            "full_prompt": prompt, "negative_prompt": negative, "seed": img.seed,
+            "provider": provider.name, "model": img.model,
+            "credits": img.credits, "usd": img.usd, "preset": None,
+        })
+        relief.log_usage(provider.name, img, design_id, request_id)
+        out.append(CandidateOut(candidate_id=design_id, thumbnail_url=f"/api/designs/{design_id}/thumbnail.png"))
+    return ReliefResponse(request_id=request_id, prompt=prompt, candidates=out, usage=relief.usage_summary(provider))
+
+
+@app.get("/api/usage")
+def get_usage():
+    """AI generation used so far: images, credits and dollars (all time and today), plus the account balance."""
+    try:
+        provider = relief.get_relief_provider()
+    except relief.ReliefError:
+        provider = None
+    return relief.usage_summary(provider)
+
+
 @app.post("/api/upload", response_model=CandidateOut)
 async def upload_photo(file: UploadFile = File(...)):
     """
@@ -225,14 +341,42 @@ def process(req: ProcessRequest):
 
     # Crop/zoom/pan happens here, every call, against the cached full image
     # -- never against the image model.
+    face_w, face_h, face_outline = config.face_geometry(req.relief_ring, req.face_tilt_deg, req.ridge_shift_mm)
+    hm_w, hm_h = int(round(face_w * config.PX_PER_MM)), int(round(face_h * config.PX_PER_MM))
+    try:
+        source_rgb = enhance.cached_upscaled(d, full_rgb) if req.upscale else full_rgb
+        depth_full = enhance.cached_depth(d, full_rgb) if req.height_source == "depth" else None
+    except enhance.ModelUnavailable as err:
+        raise HTTPException(503, str(err))
+    crop = dict(zoom=req.crop_zoom, offset_x=req.crop_offset_x, offset_y=req.crop_offset_y)
+    depth = None if depth_full is None else cover_fit_resize(depth_full, hm_w, hm_h, **crop)
     rgb = cover_fit_resize(
-        full_rgb,
-        config.HEIGHTMAP_WIDTH_PX,
-        config.HEIGHTMAP_HEIGHT_PX,
+        source_rgb,
+        hm_w,
+        hm_h,
         zoom=req.crop_zoom,
         offset_x=req.crop_offset_x,
         offset_y=req.crop_offset_y,
     )
+
+    mask = None
+    if req.remove_background:
+        try:
+            mask_full = background.cached_subject_mask(d, full_rgb)
+        except background.BackgroundRemovalUnavailable as err:
+            raise HTTPException(503, str(err))
+        # the same crop/zoom/pan as the image
+        mask = cover_fit_resize(mask_full, hm_w, hm_h, zoom=req.crop_zoom,
+                                offset_x=req.crop_offset_x, offset_y=req.crop_offset_y)
+
+    if req.flip_h:
+        rgb = np.ascontiguousarray(rgb[:, ::-1])
+        mask = None if mask is None else np.ascontiguousarray(mask[:, ::-1])
+        depth = None if depth is None else np.ascontiguousarray(depth[:, ::-1])
+    if req.flip_v:
+        rgb = np.ascontiguousarray(rgb[::-1])
+        mask = None if mask is None else np.ascontiguousarray(mask[::-1])
+        depth = None if depth is None else np.ascontiguousarray(depth[::-1])
 
     params = ProcessParams(
         invert=req.invert,
@@ -242,10 +386,22 @@ def process(req: ProcessRequest):
         levels=req.levels,
         min_feature_mm=req.min_feature_mm,
         relief_height_mm=req.relief_height_mm,
+        denoise=req.denoise,
+        bas_relief=req.bas_relief,
+        depth_detail=req.depth_detail,
+        outline_strength=req.outline_strength,
+        hatch_strength=req.hatch_strength,
+        hatch_spacing_mm=req.hatch_spacing_mm,
+        hatch_angle_deg=req.hatch_angle_deg,
+        smooth_mm=req.smooth_mm,
     )
 
     contains_text_request = prompts.mentions_text(meta.get("prompt", ""))
-    heightmap_16bit, preview_8bit, report = process_image(rgb, params, contains_text_request)
+    heightmap_16bit, preview_8bit, report = process_image(
+        rgb, params, contains_text_request, face_width_mm=face_w, face_height_mm=face_h, face_outline_mm=face_outline,
+        subject_mask=None if mask is None else mask.astype(np.float32) / 255.0,
+        depth=depth,
+    )
 
     storage.save_gray16_png(d / "heightmap.png", heightmap_16bit)
     storage.save_gray8_png(d / "preview.png", preview_8bit)
@@ -254,6 +410,8 @@ def process(req: ProcessRequest):
         **meta,
         "processing": {
             "invert": params.invert,
+            "flip_h": req.flip_h,
+            "flip_v": req.flip_v,
             "gamma": params.gamma,
             "contrast": params.contrast,
             "blur_mm": params.blur_mm,
@@ -264,8 +422,22 @@ def process(req: ProcessRequest):
             "edge_feather_mm": params.edge_feather_mm,
             "relief_max_mm": config.RELIEF_MAX_MM,
             "px_per_mm": config.PX_PER_MM,
-            "face_width_mm": config.FACE_WIDTH_MM,
-            "face_height_mm": config.FACE_HEIGHT_MM,
+            "face_width_mm": face_w,
+            "face_height_mm": face_h,
+            "relief_ring": req.relief_ring or config.DEFAULT_RELIEF_RING,
+            "face_tilt_deg": req.face_tilt_deg,
+            "ridge_shift_mm": req.ridge_shift_mm,
+            "remove_background": req.remove_background,
+            "height_source": req.height_source,
+            "upscale": req.upscale,
+            "denoise": req.denoise,
+            "bas_relief": req.bas_relief,
+            "depth_detail": req.depth_detail,
+            "outline_strength": req.outline_strength,
+            "hatch_strength": req.hatch_strength,
+            "hatch_spacing_mm": req.hatch_spacing_mm,
+            "hatch_angle_deg": req.hatch_angle_deg,
+            "smooth_mm": req.smooth_mm,
             "crop_zoom": req.crop_zoom,
             "crop_offset_x": req.crop_offset_x,
             "crop_offset_y": req.crop_offset_y,
@@ -331,7 +503,8 @@ def get_stl(design_id: str):
     stl_path = d / "model.stl"
     if not stl_path.exists() or stl_path.stat().st_mtime < heightmap_path.stat().st_mtime:
         heightmap_16bit = cv2.imread(str(heightmap_path), cv2.IMREAD_UNCHANGED)
-        mesh = heightmap_to_stl(heightmap_16bit)
+        h_px, w_px = heightmap_16bit.shape  # the face size it was made for (PX_PER_MM px per mm)
+        mesh = heightmap_to_stl(heightmap_16bit, face_width_mm=w_px / config.PX_PER_MM, face_height_mm=h_px / config.PX_PER_MM)
         mesh.export(str(stl_path))
 
     return FileResponse(str(stl_path), media_type="model/stl", filename="ring_face_relief.stl")

@@ -27,6 +27,16 @@ class ProcessParams:
     relief_height_mm: float = 0.25
     edge_margin_mm: float = config.EDGE_MARGIN_MM
     edge_feather_mm: float = config.EDGE_FEATHER_MM
+    subject_base: float = config.SUBJECT_BASE_LEVEL  # with a subject mask: the subject's lowest level
+    # Image enhancement (all off by default here; see process_image for the order they run in)
+    denoise: bool = False           # edge-preserving cleanup of the source before anything else
+    bas_relief: float = 0.0         # 0..1: squash large height differences, keep fine detail
+    depth_detail: float = 0.0       # 0..1: with depth, blend the image's fine brightness detail back on top
+    outline_strength: float = 0.0   # 0..1: engrave the image's edges (XDoG) as grooves
+    hatch_strength: float = 0.0     # 0..1: engrave tone as parallel lines (darker = wider)
+    hatch_spacing_mm: float = 0.6
+    hatch_angle_deg: float = 45.0
+    smooth_mm: float = 0.0          # final smoothing of the heightmap's edges (no stair-stepped walls)
 
 
 @dataclass
@@ -85,6 +95,133 @@ def normalize(gray: np.ndarray) -> np.ndarray:
     if hi - lo < 1e-6:
         return np.zeros_like(gray)
     return np.clip((gray - lo) / (hi - lo), 0.0, 1.0)
+
+
+def apply_subject_mask(gray: np.ndarray, mask01: np.ndarray, base: float) -> np.ndarray:
+    """Keep only the subject (mask01: 1 = subject, 0 = background, soft at the
+    edges): the background becomes flat 0, and the subject's own tones are
+    re-stretched to fill base..1, so it stands on a raised plateau with its
+    full range of detail. An empty mask leaves a blank image."""
+    inside = mask01 > 0.5
+    if not inside.any():
+        return np.zeros_like(gray)
+    lo, hi = float(gray[inside].min()), float(gray[inside].max())
+    g = np.clip((gray - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
+    return (mask01 * (base + (1.0 - base) * g)).astype(np.float32)
+
+
+# --- image enhancement ---------------------------------------------------------
+# Pure functions on arrays at heightmap resolution: they know nothing about
+# which ring the design is for, so every design ring gets them.
+
+def denoise_rgb(img_rgb: np.ndarray, px_per_mm: int = config.PX_PER_MM) -> np.ndarray:
+    """Edge-preserving cleanup: smooths grain and compression noise (which would
+    otherwise become bumpy metal) while keeping edges sharp. Two bilateral passes."""
+    out = img_rgb
+    for _ in range(2):
+        out = cv2.bilateralFilter(out, d=0, sigmaColor=24, sigmaSpace=max(2.0, 0.05 * px_per_mm))
+    return out
+
+
+def bas_relief(height: np.ndarray, strength: float, px_per_mm: int = config.PX_PER_MM) -> np.ndarray:
+    """Bas-relief compression, as for coins and medals: real depth is far too
+    deep for a fraction of a millimetre, so the overall form (a face's
+    roundness, a subject's step off the background) is squashed while fine
+    detail (eyes, nose, hair) keeps its full height. Two stages:
+
+    1. cliffs: gradients steeper than 3x the average are compressed in the
+       gradient domain, scaled by (a/|g|)^b with b = 0.85 * strength (Fattal
+       et al.), and the heightfield rebuilt with a Poisson solve (DCT,
+       Neumann boundaries);
+    2. form vs detail, graded like an image pyramid (BAS_RELIEF_SCALES_MM):
+       shapes broader than the coarse scale shrink to 1 - 0.8 * strength of
+       their height, mid-scale shapes to 1 - 0.4 * strength, and detail finer
+       than the fine scale keeps its full height.
+
+    Returns heights stretched to 0..1."""
+    if strength <= 0:
+        return height
+    from scipy.fft import dctn, idctn
+
+    k = float(np.clip(strength, 0.0, 1.0))
+    h = height.astype(np.float64)
+    gx = np.diff(h, axis=1, append=h[:, -1:])
+    gy = np.diff(h, axis=0, append=h[-1:, :])
+    mag = np.hypot(gx, gy)
+    a = 3.0 * (float(mag[mag > 1e-9].mean()) if (mag > 1e-9).any() else 1e-6)
+    scale = np.where(mag > a, (a / np.maximum(mag, 1e-12)) ** (0.85 * k), 1.0)
+    gx, gy = gx * scale, gy * scale
+    div = (gx - np.pad(gx, ((0, 0), (1, 0)))[:, :-1]) + (gy - np.pad(gy, ((1, 0), (0, 0)))[:-1, :])
+    H, W = h.shape
+    yy, xx = np.ogrid[:H, :W]
+    denom = (2 * np.cos(np.pi * xx / W) - 2) + (2 * np.cos(np.pi * yy / H) - 2)
+    denom[0, 0] = 1.0
+    f = dctn(div, type=2, norm="ortho") / denom
+    f[0, 0] = 0.0
+    u = idctn(f, type=2, norm="ortho").astype(np.float32)
+
+    coarse_mm, fine_mm = config.BAS_RELIEF_SCALES_MM
+    base = cv2.GaussianBlur(u, (0, 0), coarse_mm * px_per_mm)   # broad form
+    mid = cv2.GaussianBlur(u, (0, 0), fine_mm * px_per_mm)      # form + mid-scale shapes
+    u = base * (1.0 - 0.8 * k) + (mid - base) * (1.0 - 0.4 * k) + (u - mid)
+    lo, hi = np.percentile(u, 0.2), np.percentile(u, 99.8)
+    return np.clip((u - lo) / max(hi - lo, 1e-9), 0.0, 1.0).astype(np.float32)
+
+
+def xdog_lines(lum: np.ndarray, px_per_mm: int = config.PX_PER_MM) -> np.ndarray:
+    """Engraver-style outlines (eXtended Difference of Gaussians): 0..1, 1 =
+    on a line. Line width is set from the scale of the heightmap (about
+    0.1-0.15 mm), so outlines stay crisp but castable."""
+    sigma = 0.06 * px_per_mm
+    g1 = cv2.GaussianBlur(lum, (0, 0), sigma)
+    g2 = cv2.GaussianBlur(lum, (0, 0), sigma * 1.6)
+    d = g1 - 0.98 * g2
+    eps, phi = -0.004, 120.0
+    paper = np.where(d >= eps, 1.0, 1.0 + np.tanh(phi * (d - eps)))
+    return np.clip(1.0 - paper, 0.0, 1.0).astype(np.float32)
+
+
+def hatch_lines(lum: np.ndarray, spacing_mm: float, angle_deg: float,
+                px_per_mm: int = config.PX_PER_MM) -> np.ndarray:
+    """Banknote-style hatching: parallel lines `spacing_mm` apart at `angle_deg`,
+    each as wide as the tone is dark (black = 80% of the spacing, white = none).
+    Anti-aliased over a pixel. 0..1, 1 = on a line."""
+    H, W = lum.shape
+    period = max(2.0, spacing_mm * px_per_mm)
+    t = np.radians(angle_deg)
+    yy, xx = np.mgrid[:H, :W].astype(np.float32)
+    along = xx * np.cos(t) + yy * np.sin(t)
+    dist = np.abs(((along / period) % 1.0) - 0.5) * period          # px from the line's centre
+    half = (1.0 - np.clip(lum, 0, 1)) * 0.4 * period                 # half line width
+    return np.clip(half - dist + 0.5, 0.0, 1.0).astype(np.float32)
+
+
+def add_detail(height: np.ndarray, lum: np.ndarray, amount: float,
+               px_per_mm: int = config.PX_PER_MM) -> np.ndarray:
+    """Depth gives a photo's overall form but loses texture (eyes, fur, hair).
+    Blend the image's fine brightness detail -- what's left after removing
+    everything coarser than DEPTH_DETAIL_SCALE_MM -- back on top, then
+    re-stretch to 0..1."""
+    if amount <= 0:
+        return height
+    detail = lum - cv2.GaussianBlur(lum, (0, 0), config.DEPTH_DETAIL_SCALE_MM * px_per_mm)
+    spread = float(np.percentile(np.abs(detail), 99)) or 1.0
+    return normalize(height + 0.35 * float(amount) * detail / spread)
+
+
+def engrave(height: np.ndarray, lines: np.ndarray, strength: float) -> np.ndarray:
+    """Cut `lines` into the relief as grooves, up to ENGRAVE_MAX_DEPTH x strength deep."""
+    if strength <= 0:
+        return height
+    return np.clip(height - config.ENGRAVE_MAX_DEPTH * float(strength) * lines, 0.0, 1.0)
+
+
+def smooth_edges(gray: np.ndarray, smooth_mm: float, px_per_mm: int = config.PX_PER_MM) -> np.ndarray:
+    """Final light smoothing so steps between heights become short slopes:
+    stair-stepped vertical walls are what show as jagged lines in the metal."""
+    if smooth_mm <= 0:
+        return gray
+    return cv2.GaussianBlur(gray, (0, 0), smooth_mm * px_per_mm)
 
 
 def quantize(gray: np.ndarray, levels: int) -> np.ndarray:
@@ -193,6 +330,36 @@ def edge_margin_mask(
     return mask.astype(np.float32)
 
 
+def outline_margin_mask(
+    height_px: int,
+    width_px: int,
+    outline_mm,
+    margin_mm: float,
+    feather_mm: float,
+    px_per_mm: int = config.PX_PER_MM,
+    face_width_mm: float = config.FACE_WIDTH_MM,
+    face_height_mm: float = config.FACE_HEIGHT_MM,
+) -> np.ndarray:
+    """
+    Like edge_margin_mask, but measured from an arbitrary face outline (list
+    of (x, z) mm points centred on the face's bounding box) instead of the
+    rectangle. 0 outside the outline and within margin_mm of it, ramping to 1
+    over feather_mm.
+    """
+    pts = np.array(
+        [
+            [(x / face_width_mm + 0.5) * (width_px - 1), (z / face_height_mm + 0.5) * (height_px - 1)]
+            for x, z in outline_mm
+        ],
+        dtype=np.float32,
+    )
+    inside = np.zeros((height_px, width_px), np.uint8)
+    cv2.fillPoly(inside, [np.round(pts).astype(np.int32)], 1)
+    dist_px = cv2.distanceTransform(inside, cv2.DIST_L2, 5)
+    mask = (dist_px - margin_mm * px_per_mm) / max(feather_mm * px_per_mm, 1e-6)
+    return np.clip(mask, 0.0, 1.0).astype(np.float32)
+
+
 def to_heightmap_16bit(gray01: np.ndarray, relief_height_mm: float, relief_max_mm: float = config.RELIEF_MAX_MM) -> np.ndarray:
     """gray01 in 0..1 -> uint16 array where 65535 == relief_max_mm."""
     relief_height_mm = float(np.clip(relief_height_mm, 0.0, relief_max_mm))
@@ -214,9 +381,13 @@ def compute_report(
     px_per_mm: int = config.PX_PER_MM,
     relief_max_mm: float = config.RELIEF_MAX_MM,
     silver_density_g_cm3: float = config.SILVER_DENSITY_G_CM3,
+    region: np.ndarray | None = None,
 ) -> ProcessReport:
     # gray01_final is heightmap_16bit / 65535, i.e. each pixel's actual height
     # as a fraction of RELIEF_MAX_MM (not of the user's chosen relief_height_mm).
+    # `region` (bool mask) limits the stats to the pixels that land on the face.
+    if region is not None:
+        gray01_final = gray01_final[region]
     raised = gray01_final > config.RAISED_THRESHOLD
     coverage_percent = 100.0 * raised.sum() / raised.size
 
@@ -262,40 +433,93 @@ def compute_report(
     )
 
 
-def process_image(img_rgb: np.ndarray, params: ProcessParams, contains_text_request: bool = False) -> tuple[np.ndarray, np.ndarray, ProcessReport]:
+def process_image(
+    img_rgb: np.ndarray,
+    params: ProcessParams,
+    contains_text_request: bool = False,
+    face_width_mm: float = config.FACE_WIDTH_MM,
+    face_height_mm: float = config.FACE_HEIGHT_MM,
+    face_outline_mm=config.FACE_OUTLINE_MM,
+    subject_mask: np.ndarray | None = None,
+    depth: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, ProcessReport]:
     """
-    Full pipeline: raw RGB image -> (heightmap_16bit, preview_8bit, report).
+    Full pipeline: raw RGB image -> (heightmap_16bit, preview_8bit, report),
+    for a design area of face_width_mm x face_height_mm (PX_PER_MM px per mm).
+    `subject_mask` (float 0..1, same shape as img_rgb; 1 = subject) removes the
+    background: see apply_subject_mask. `depth` (float 0..1, 1 = nearest, same
+    shape) makes height follow the photo's 3D shape instead of its brightness.
+
+    Order: denoise -> height from brightness or depth -> invert/gamma/blur ->
+    normalize -> (depth: fine brightness detail added back) -> bas-relief compression -> subject mask -> engraved outlines
+    and hatching (from the image's tones) -> quantize -> minimum feature size
+    -> edge smoothing -> scale to the relief height.
     """
-    gray = to_grayscale(img_rgb)
-    gray = resize_to_heightmap(gray)
+    W = int(round(face_width_mm * config.PX_PER_MM))
+    H = int(round(face_height_mm * config.PX_PER_MM))
+    rgb = cv2.resize(img_rgb, (W, H), interpolation=cv2.INTER_AREA) if img_rgb.ndim == 3 else img_rgb
+    if params.denoise and rgb.ndim == 3:
+        rgb = denoise_rgb(rgb)
+    lum = resize_to_heightmap(to_grayscale(rgb), W, H)  # the image's tones, for engraving
+    if depth is not None:
+        gray = cv2.resize(depth.astype(np.float32), (W, H), interpolation=cv2.INTER_AREA)
+    else:
+        gray = lum.copy()
     gray = apply_invert(gray, params.invert)
     gray = apply_gamma_contrast(gray, params.gamma, params.contrast)
     gray = apply_blur(gray, params.blur_mm)
     gray = normalize(gray)
+    if depth is not None:
+        gray = add_detail(gray, lum, params.depth_detail)
+    gray = bas_relief(gray, params.bas_relief)
+    mask01 = None
+    if subject_mask is not None:
+        mask01 = cv2.resize(subject_mask.astype(np.float32), (gray.shape[1], gray.shape[0]), interpolation=cv2.INTER_AREA)
+        gray = apply_subject_mask(gray, mask01, params.subject_base)
+    if params.outline_strength > 0:
+        gray = engrave(gray, xdog_lines(lum), params.outline_strength)
+    if params.hatch_strength > 0:
+        gray = engrave(gray, hatch_lines(lum, params.hatch_spacing_mm, params.hatch_angle_deg), params.hatch_strength)
 
     if params.levels and params.levels >= 2:
         gray = quantize(gray, params.levels)
 
     gray, min_feature_removed_fraction = enforce_min_feature(gray, params.min_feature_mm, params.levels)
+    gray = smooth_edges(gray, params.smooth_mm)
 
-    mask = edge_margin_mask(
-        gray.shape[0], gray.shape[1], params.edge_margin_mm, params.edge_feather_mm
-    )
-    raised_before_margin = float((gray > config.RAISED_THRESHOLD).sum())
-    gray_margined = gray * mask
-    raised_after_margin = float((gray_margined > config.RAISED_THRESHOLD).sum())
-    margin_clipped_fraction = (
-        0.0 if raised_before_margin == 0 else max(0.0, (raised_before_margin - raised_after_margin) / raised_before_margin)
-    )
+    # The design is never clipped to the face outline: it runs right up to
+    # (and, in the bounding box's corners, past) the rounded rim, and the
+    # viewer carries it over the edge onto the shoulders. A rectangular edge
+    # margin is only applied if one is configured (EDGE_MARGIN_MM, 0 by default).
+    if params.edge_margin_mm > 0:
+        mask = edge_margin_mask(gray.shape[0], gray.shape[1], params.edge_margin_mm, params.edge_feather_mm)
+        raised_before_margin = float((gray > config.RAISED_THRESHOLD).sum())
+        gray_margined = gray * mask
+        raised_after_margin = float((gray_margined > config.RAISED_THRESHOLD).sum())
+        margin_clipped_fraction = (
+            0.0 if raised_before_margin == 0 else max(0.0, (raised_before_margin - raised_after_margin) / raised_before_margin)
+        )
+    else:
+        gray_margined = gray
+        margin_clipped_fraction = 0.0
 
     heightmap_16bit = to_heightmap_16bit(gray_margined, params.relief_height_mm)
     preview_8bit = heightmap_to_preview_8bit(heightmap_16bit)
 
     gray01_final = heightmap_16bit.astype(np.float32) / 65535.0
+    # Coverage/volume/weight only count what actually lands on the face.
+    on_face = (
+        outline_margin_mask(
+            gray01_final.shape[0], gray01_final.shape[1], face_outline_mm, 0.0, 1e-6,
+            face_width_mm=face_width_mm, face_height_mm=face_height_mm,
+        ) > 0
+        if face_outline_mm else None
+    )
     report = compute_report(
         gray01_final,
         min_feature_removed_fraction,
         margin_clipped_fraction,
+        region=on_face,
     )
 
     if contains_text_request:
