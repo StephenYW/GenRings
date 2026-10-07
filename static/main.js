@@ -408,6 +408,7 @@ async function selectRing(shape, size) {
     mesh.material = getSilverMaterial();
     state.reliefMesh = null;
     state.reliefBase = null;
+    state.ringTruePos = null;
     state.ringVolumeMm3 = meshVolume(geo.attributes.position.array, geo.index.array);
   }
 
@@ -418,6 +419,8 @@ async function selectRing(shape, size) {
   }
   ringGroup.add(gltf.scene);
   RINGS.current = { shape, size };
+  RINGS.mesh = mesh;
+  document.getElementById("downloadRingStl").disabled = false;
   frameRing();
   if (relief) updateMeshHeights();
   updateRingWeight();
@@ -779,12 +782,51 @@ function displaceFace() {
       truePos[3 * i + 1] = basePos[3 * i + 1] + (truePos[3 * e + 1] - basePos[3 * e + 1]) * (1 - wall[2 * i + 1]);
     }
   }
+  state.ringTruePos = truePos;
   state.ringVolumeMm3 = meshVolume(truePos, geo.index.array);
   updateRingWeight();
   pos.needsUpdate = true;
   col.needsUpdate = true;
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
+}
+
+/**
+ * The ring as shown -- with the design at its true height, not the preview
+ * exaggeration -- as a binary STL in millimetres (the ring models' units).
+ */
+function ringStlBlob() {
+  const geo = RINGS.mesh.geometry;
+  const pos = (state.reliefMesh === RINGS.mesh && state.ringTruePos) || geo.attributes.position.array;
+  const index = geo.index ? geo.index.array : Uint32Array.from({ length: pos.length / 3 }, (_, i) => i);
+  const tris = index.length / 3;
+  const buf = new ArrayBuffer(84 + tris * 50);
+  const view = new DataView(buf);
+  const header = "SilverSignal ring, mm";
+  for (let i = 0; i < header.length; i++) view.setUint8(i, header.charCodeAt(i));
+  view.setUint32(80, tris, true);
+  let o = 84;
+  for (let t = 0; t < tris; t++) {
+    const a = 3 * index[3 * t], b = 3 * index[3 * t + 1], c = 3 * index[3 * t + 2];
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+    const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    for (const v of [nx / len, ny / len, nz / len]) { view.setFloat32(o, v, true); o += 4; }
+    for (const k of [a, b, c]) for (let j = 0; j < 3; j++) { view.setFloat32(o, pos[k + j], true); o += 4; }
+    o += 2; // attribute byte count
+  }
+  return new Blob([buf], { type: "model/stl" });
+}
+
+function downloadRingStl() {
+  if (!RINGS.mesh || !RINGS.current) return;
+  const url = URL.createObjectURL(ringStlBlob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `ring_${RINGS.current.shape}_size${RINGS.current.size}.stl`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function updateMeshHeights() {
@@ -1063,6 +1105,8 @@ async function refreshFromBackend() {
     state.previewCanvas = canvas;
     updateMeshHeights();
     renderReport(result.report);
+    state.background = result.background || null;
+    renderBgChoices();
     document.getElementById("downloadHeightmap").href = result.heightmap_url;
     document.getElementById("downloadParams").href = result.params_url;
     document.getElementById("downloadStl").href = `/api/designs/${state.selectedCandidateId}/model.stl`;
@@ -1324,8 +1368,71 @@ function renderUsage(u) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Background: paste the selected candidate's subject on another background
+// asset after it was made (POST /api/designs/<id>/background), then reprocess
+// ---------------------------------------------------------------------------
+
+function initBackgrounds() {
+  const opts = AI.options ? AI.options.additions.filter((a) => a.group === "background") : [];
+  if (!opts.length) return;
+  const row = document.getElementById("bgChoices");
+  for (const o of [{ id: null, label: "As made" }, ...opts]) {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.textContent = o.label;
+    b.dataset.id = o.id || "";
+    b.addEventListener("click", () => changeBackground(o.id));
+    row.appendChild(b);
+  }
+  document.getElementById("bgRow").hidden = false;
+}
+
+function renderBgChoices() {
+  document.querySelectorAll("#bgChoices .chip").forEach((b) =>
+    b.classList.toggle("on", state.background !== undefined && b.dataset.id === (state.background || "")));
+}
+
+async function changeBackground(choice) {
+  const id = state.selectedCandidateId;
+  if (!id || state.bgBusy || (choice || null) === (state.background || null)) return;
+  state.bgBusy = true;
+  setStatus("bgStatus", "Placing the subject on the new background… (finding the subject the first time takes a few seconds)");
+  try {
+    const res = await fetch(`/api/designs/${id}/background`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ choice }),
+    });
+    if (!res.ok) {
+      let msg = await res.text();
+      try { msg = JSON.parse(msg).detail || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+    state.background = choice;
+    renderBgChoices();
+    // the new image, keeping the crop
+    const t = Date.now();
+    const thumbUrl = `/api/designs/${id}/thumbnail.png?t=${t}`;
+    const c = state.candidates.find((x) => x.candidate_id === id);
+    if (c) c.thumbnail_url = thumbUrl;
+    const thumb = document.querySelector(`#gallery img[data-candidate-id="${id}"]`);
+    if (thumb) thumb.src = thumbUrl;
+    const img = document.getElementById("cropperImage");
+    img.onload = null;
+    img.src = `/api/designs/${id}/full.png?t=${t}`;
+    setStatus("bgStatus", "");
+    await refreshFromBackend();   // depth -> heightmap on the new image
+  } catch (err) {
+    console.error(err);
+    setStatus("bgStatus", "Couldn't change the background: " + err.message, true);
+  } finally {
+    state.bgBusy = false;
+  }
+}
+
 async function selectCandidate(candidateId, imgEl) {
   state.selectedCandidateId = candidateId;
+  state.background = undefined;   // known once it's processed
+  renderBgChoices();
   document.querySelectorAll("#gallery img").forEach((el) => el.classList.remove("selected"));
   if (imgEl) imgEl.classList.add("selected");
   document.getElementById("cropSection").hidden = false;
@@ -1431,7 +1538,10 @@ async function main() {
   updateMeshHeights();
 
   wireUI(cfg);
-  initAI();
+  document.getElementById("downloadRingStl").addEventListener("click", downloadRingStl);
+  document.getElementById("downloadRingStlLink").addEventListener("click", (e) => { e.preventDefault(); downloadRingStl(); });
+  await initAI();
+  initBackgrounds();
 }
 
 main();

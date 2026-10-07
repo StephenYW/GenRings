@@ -159,7 +159,10 @@ area.
 The viewer (`displaceFace`) pushes each design-area vertex out along its normal (straight
 up) by the heightmap. Nothing outside the area moves: the rounded edge and band stay
 exactly as the source ring, and the design ends at the area's edge with a hard edge. Other rings show without a design, and the menu says so.
-The STL export is still the plain rectangular relief slab.
+**Download ring STL** (top right of the 3D view, and in the report's downloads) saves the
+whole ring as shown, with the design at its true height (never the preview exaggeration),
+as a binary STL in millimetres, built in the browser from the displayed mesh (watertight;
+its detail is the ring mesh's resolution). The face-slab STL below is still available.
 
 ## How it works
 
@@ -306,6 +309,19 @@ shadows, depth or lighting:
   subject sitting above it from `SUBJECT_BASE_LEVEL`.
 - Without a background option, nothing changes: the whole image is sculpted as usual.
 
+**Changing the background afterwards.** The **Background** chips under the crop image
+(As made, No background, and each texture) work on any selected candidate, AI result or
+upload, at any time: the subject is cut out of the image as it was made (kept as
+`generated.png`; the solid cut-out mask is cached as `cutout_mask.png`), pasted on the chosen
+background asset, and the cached depth is dropped, so depth → heightmap re-runs on the new
+image. No new AI generation is needed. "As made" restores the original image.
+`POST /api/designs/<id>/background` with `{"choice": "<background option id>" | null}`.
+
+**Keeping the original.** At the default "close" faithfulness, the sentence straight after
+the main instruction tells the model to keep everything in the original — the same framing,
+the whole figure as far as it is visible (never a bust or close-up), every object — removing
+and adding nothing apart from the requested changes.
+
 **Where the textures live:** `static/textures/` — one grayscale PNG per texture (white =
 raised, black = the flat background) and `textures.json` listing them as `{"id", "label",
 "file", "mode", "tile_mm"}`. `"tile"` textures repeat every `tile_mm` millimetres (the same
@@ -445,7 +461,8 @@ processing, `heightmap.png`, `preview.png`, `params.json`, and (on request) `mod
   it's a preview-quality mesh, not a full-resolution manufacturing file.
 - Designs are applied to two rings (S Square and S Square ridged) so far; the other 188
   rings show without one.
-- Only the face relief is ever exported (as a rectangular slab STL), not the ring it sits on.
+- The ring STL's relief detail is limited by the ring model's mesh density in the design area
+  (the 16-bit heightmap holds finer detail).
 
 ## Metal look
 

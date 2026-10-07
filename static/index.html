@@ -83,6 +83,12 @@
         </div>
         <label>Zoom <span id="cropZoomVal"></span></label>
         <input type="range" id="cropZoom" min="1" max="6" step="0.05" value="1" />
+        <div id="bgRow" hidden>
+          <label>Background</label>
+          <p class="hint">Places the subject on a flat background (textures are raised slightly) and re-runs depth → heightmap. "As made" goes back to the image as it was generated or uploaded.</p>
+          <div id="bgChoices" class="chip-row"></div>
+          <div id="bgStatus" class="status"></div>
+        </div>
       </section>
 
       <section id="paramsSection" hidden>
@@ -156,16 +162,18 @@
         <div class="downloads">
           <a id="downloadHeightmap" href="#" download>Download 16-bit heightmap.png</a>
           <a id="downloadParams" href="#" download>Download params.json</a>
-          <a id="downloadStl" href="#" download>Download STL (watertight, relief + base slab)</a>
+          <a id="downloadRingStlLink" href="#">Download ring STL (the whole ring with the design, mm)</a>
+          <a id="downloadStl" href="#" download>Download face slab STL (flat: relief + base slab)</a>
         </div>
       </section>
     </aside>
 
     <main id="viewer">
       <canvas id="three-canvas"></canvas>
+      <button id="downloadRingStl" class="viewer-btn" disabled title="The ring as shown, with the design at its true height (not the preview exaggeration), in millimetres">Download ring STL</button>
     </main>
   </div>
 
-  <script type="module" src="/main.js?v=relief4"></script>
+  <script type="module" src="/main.js?v=relief5"></script>
 </body>
 </html>

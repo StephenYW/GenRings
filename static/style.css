@@ -117,6 +117,12 @@ hr { border: none; border-top: 1px solid #2c2f36; margin: 4px 0; }
 
 #viewer { flex: 1; position: relative; }
 #three-canvas { width: 100%; height: 100%; display: block; }
+.viewer-btn {
+  position: absolute; top: 12px; right: 12px; padding: 8px 14px; border-radius: 8px;
+  border: 1px solid #4a7cff; background: #2b3d6bcc; color: #dbe6ff; font-size: 13px; cursor: pointer;
+}
+.viewer-btn:hover:not(:disabled) { background: #3a5291; }
+.viewer-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* --- Design with AI --------------------------------------------------------- */
 .usage { font-size: 11px; color: #8a8f99; background: #15171a; border: 1px solid #2c2f36; border-radius: 6px; padding: 6px 8px; }

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+import shutil
 import uuid
+from pathlib import Path
 from typing import Optional
 
 import cv2
@@ -118,6 +120,7 @@ class ProcessResponse(BaseModel):
     heightmap_url: str
     params_url: str
     report: ReportOut
+    background: Optional[str] = None    # the candidate's background option id, if one is applied
 
 
 # --- endpoints ---------------------------------------------------
@@ -282,26 +285,15 @@ def generate_relief(req: ReliefRequest):
         same_shape = cover_fit_resize(img.rgb, max(1, round(w0 * scale)), max(1, round(h0 * scale)))
         full = cap_max_dimension(same_shape, config.MAX_FULL_IMAGE_DIM_PX)
         design_id, d = storage.new_design_dir()
-        if bg_choice:
-            # The model drew the subject on a plain background: cut it out and
-            # build the background here -- flat, shadow-free, with the chosen
-            # texture (raised slightly in the heightmap, see /api/process).
-            storage.save_rgb_png(d / "generated.png", full)  # the model's own image, before compositing
-            try:
-                mask = background.solid_subject_mask(full)
-            except background.BackgroundRemovalUnavailable as err:
-                raise HTTPException(503, str(err))
-            cv2.imwrite(str(d / "subject_mask.png"), mask)
-            m = (mask.astype(np.float32) / 255.0)[..., None]
-            flat = textures.flat_preview(bg_choice.texture, full.shape[1], full.shape[0])
-            full = np.clip(full * m + flat * (1 - m), 0, 255).astype(np.uint8)
-        storage.save_rgb_png(d / "candidate_full.png", full)
-        storage.save_rgb_png(d / "thumbnail.png", storage.make_thumbnail(full))
+        storage.save_rgb_png(d / "generated.png", full)  # the model's own image, before any background
+        # with a background option the model drew the subject on a plain
+        # background: cut it out and lay it on the chosen background asset
+        _apply_background(d, bg_choice)
         storage.write_json(d / "meta.json", {
             "design_id": design_id, "source": "relief", "parent": origin_id, "request_id": request_id,
             "prompt": req.text, "style": req.style, "image_type": req.image_type, "additions": req.additions,
             "fidelity": req.fidelity,
-            "background": {"choice": bg_choice.id, "texture": bg_choice.texture} if bg_choice else None,
+            "background": _background_meta(bg_choice),
             "full_prompt": prompt, "negative_prompt": negative, "seed": img.seed,
             "provider": provider.name, "model": img.model,
             "credits": img.credits, "usd": img.usd, "preset": None,
@@ -326,6 +318,66 @@ def _original_of(design_id: str) -> str:
             break
         design_id = parent
     return design_id
+
+
+def _apply_background(d: Path, choice: relief_prompts.Addition | None) -> None:
+    """Make the candidate's image from its subject and a background choice:
+    the subject cut out of generated.png (the image as it was made or
+    uploaded) and pasted on the background asset -- flat, shadow-free, with
+    the option's texture (raised slightly in the heightmap, see /api/process)
+    -- or, with no choice, the image as it was made. Clears what was cached
+    from the old image (depth, upscale), so the next /api/process re-runs
+    depth -> heightmap on the new one."""
+    gen_path = d / "generated.png"
+    if not gen_path.exists():           # first change to an older candidate: keep it as it was
+        shutil.copyfile(d / "candidate_full.png", gen_path)
+    gen = cv2.cvtColor(cv2.imread(str(gen_path), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+    full = gen
+    if choice is not None:
+        mask_path = d / "cutout_mask.png"   # the solid cut-out (subject_mask.png is the soft one)
+        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE) if mask_path.exists() else None
+        if mask is None or mask.shape != gen.shape[:2]:
+            try:
+                mask = background.solid_subject_mask(gen)
+            except background.BackgroundRemovalUnavailable as err:
+                raise HTTPException(503, str(err))
+            cv2.imwrite(str(mask_path), mask)
+        m = (mask.astype(np.float32) / 255.0)[..., None]
+        flat = textures.flat_preview(choice.texture, gen.shape[1], gen.shape[0])
+        full = np.clip(gen * m + flat * (1 - m), 0, 255).astype(np.uint8)
+    storage.save_rgb_png(d / "candidate_full.png", full)
+    storage.save_rgb_png(d / "thumbnail.png", storage.make_thumbnail(full))
+    for stale in ("depth.png", "upscaled.png"):
+        (d / stale).unlink(missing_ok=True)
+
+
+def _background_meta(choice: relief_prompts.Addition | None) -> dict | None:
+    return {"choice": choice.id, "texture": choice.texture} if choice else None
+
+
+class BackgroundRequest(BaseModel):
+    choice: Optional[str] = None    # a background option id (relief_prompts.ADDITIONS); none = as made
+
+
+@app.post("/api/designs/{design_id}/background")
+def set_background(design_id: str, req: BackgroundRequest):
+    """Change a candidate's background after it was made: paste its subject on
+    another background asset (or go back to the image as made). The candidate
+    keeps its id; reprocess it to get the new heightmap."""
+    d = storage.design_dir(design_id)
+    if not (d / "candidate_full.png").exists():
+        raise HTTPException(404, f"Unknown candidate '{design_id}'")
+    choice = None
+    if req.choice:
+        choice = relief_prompts.ADDITIONS.get(req.choice)
+        if choice is None or choice.group != "background":
+            raise HTTPException(400, f"Unknown background '{req.choice}'")
+    _apply_background(d, choice)
+    meta = storage.read_json(d / "meta.json")
+    meta["background"] = _background_meta(choice)
+    storage.write_json(d / "meta.json", meta)
+    return {"design_id": design_id, "background": req.choice or None,
+            "thumbnail_url": f"/api/designs/{design_id}/thumbnail.png"}
 
 
 @app.get("/api/usage")
@@ -419,8 +471,11 @@ def process(req: ProcessRequest):
     bg_meta = meta.get("background") or {}
     mask = None
     if req.remove_background or bg_meta:
+        cutout = d / "cutout_mask.png"
         try:
-            mask_full = background.cached_subject_mask(d, full_rgb)
+            mask_full = cv2.imread(str(cutout), cv2.IMREAD_GRAYSCALE) if bg_meta and cutout.exists() else None
+            if mask_full is None or mask_full.shape != full_rgb.shape[:2]:
+                mask_full = background.cached_subject_mask(d, full_rgb)
         except background.BackgroundRemovalUnavailable as err:
             raise HTTPException(503, str(err))
         # the same crop/zoom/pan as the image
@@ -516,6 +571,7 @@ def process(req: ProcessRequest):
         preview_url=f"/api/designs/{req.candidate_id}/preview.png",
         heightmap_url=f"/api/designs/{req.candidate_id}/heightmap.png",
         params_url=f"/api/designs/{req.candidate_id}/params.json",
+        background=bg_meta.get("choice"),
         report=ReportOut(
             coverage_percent=report.coverage_percent,
             relief_volume_mm3=report.relief_volume_mm3,

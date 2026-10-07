@@ -100,7 +100,7 @@ def test_background_option_gives_a_flat_textured_background(client):
     d = storage.design_dir(cid)
     meta = storage.read_json(d / "meta.json")
     assert meta["background"] == {"choice": "stippled", "texture": "stippled"}
-    assert (d / "subject_mask.png").exists()
+    assert (d / "cutout_mask.png").exists() and (d / "generated.png").exists()
     # the image: subject pasted on a flat pattern (only two flat tones, no shading)
     img = cv2.imread(str(d / "candidate_full.png"), cv2.IMREAD_GRAYSCALE)
     corner = img[: img.shape[0] // 4, : img.shape[1] // 4]
@@ -197,7 +197,7 @@ def test_fal_request(monkeypatch, model, image_field, negative):
     body = seen["body"]
     img = body[image_field][0] if image_field == "image_urls" else body[image_field]
     assert img.startswith("data:image/jpeg;base64,")
-    assert body["prompt"].startswith("Convert this image into") and "exact composition" in body["prompt"]
+    assert body["prompt"].startswith("Convert this image into") and "never cropped into a bust" in body["prompt"]
     assert body["seed"] == 7 and body["num_images"] == 1
     assert ("negative_prompt" in body) == negative
     if model == "fal-ai/flux-pro/kontext":
@@ -252,3 +252,50 @@ def test_picked_model_makes_singles_and_variations(client, monkeypatch):
 def test_no_model_choices_without_fal(client):
     opts = client.get("/api/relief/options").json()
     assert opts["model_choices"] == [] and opts["default_model"] is None
+
+
+def test_keep_everything_comes_first_and_allows_requested_changes():
+    """At "close" faithfulness the no-bust / nothing-added-or-removed sentence
+    comes straight after the main instruction; requested changes are exempt."""
+    p, _ = relief_prompts.build_relief_prompt("classic", [], "", instruction=True, fidelity=0.8)
+    first, second = p.split(". ")[:2]
+    assert first.startswith("Convert this image") and second.startswith("Keep everything in the original")
+    assert "never cropped into a bust" in p and "remove nothing and add nothing." in p
+    p, _ = relief_prompts.build_relief_prompt("classic", ["stippled"], "", instruction=True, fidelity=0.8)
+    assert "Keep the subject exactly as in the original" in p and "add nothing." in p   # a background isn't a change
+    p, _ = relief_prompts.build_relief_prompt("classic", ["laurel"], "as a pirate", instruction=True, fidelity=0.8)
+    assert "add nothing apart from the requested changes" in p
+    p, _ = relief_prompts.build_relief_prompt("classic", [], "", instruction=True, fidelity=0.3)
+    assert "Keep everything" not in p and "reinterpret" in p                            # creative: the user's choice
+
+
+def test_background_can_be_changed_after_generation(client):
+    """Paste the subject on another background asset (or go back to the image
+    as made); cached depth is dropped so depth -> heightmap re-runs."""
+    src = _upload(client)
+    cid = client.post("/api/relief", json={"source_id": src}).json()["candidates"][0]["candidate_id"]
+    d = storage.design_dir(cid)
+    as_made = cv2.imread(str(d / "candidate_full.png"))
+    params = {"candidate_id": cid, "height_source": "brightness"}
+    assert client.post("/api/process", json=params).json()["background"] is None
+    (d / "depth.png").write_bytes(b"stale")                       # stands in for a cached depth map
+
+    r = client.post(f"/api/designs/{cid}/background", json={"choice": "hammered"})
+    assert r.status_code == 200 and r.json()["background"] == "hammered"
+    assert storage.read_json(d / "meta.json")["background"] == {"choice": "hammered", "texture": "hammered"}
+    assert not (d / "depth.png").exists() and (d / "cutout_mask.png").exists()
+    changed = cv2.imread(str(d / "candidate_full.png"))
+    assert not np.array_equal(changed, as_made)
+    assert np.array_equal(cv2.imread(str(d / "generated.png")), as_made)  # the image as made is kept
+    assert client.post("/api/process", json=params).json()["background"] == "hammered"
+
+    assert client.post(f"/api/designs/{cid}/background", json={"choice": "no_background"}).status_code == 200
+    assert storage.read_json(d / "meta.json")["background"]["texture"] is None
+    assert client.post(f"/api/designs/{cid}/background", json={}).status_code == 200      # back to as made
+    assert np.array_equal(cv2.imread(str(d / "candidate_full.png")), as_made)
+    assert storage.read_json(d / "meta.json")["background"] is None
+
+    # uploads work the same way (their own image is kept on the first change)
+    assert client.post(f"/api/designs/{src}/background", json={"choice": "stars"}).status_code == 200
+    assert client.post(f"/api/designs/{src}/background", json={"choice": "laurel"}).status_code == 400
+    assert client.post(f"/api/designs/{'0' * 32}/background", json={"choice": "stars"}).status_code == 404

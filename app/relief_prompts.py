@@ -41,10 +41,18 @@ CASTING = ("Simplify it for metal casting while keeping the likeness: replace fi
 SUBJECT_ONLY = ("Show only the main subject, cleanly separated, on a perfectly plain, flat, uniform light grey "
                 "background: no texture, no gradient, no lighting or shading on the background, and no shadow "
                 "cast by the subject.")
+# Straight after the main instruction (where editing models weigh it most):
+# the result must match the original -- models like to crop people into a
+# bust or close-up, drop things, or invent new ones.
+KEEP_ALL = ("Keep everything in the original: the same framing, the whole figure as far as it is visible (never "
+            "cropped into a bust or a close-up), and every object and background element -- remove nothing and "
+            "add nothing{except_changes}.")
+KEEP_SUBJECT = ("Keep the subject exactly as in the original: the whole figure as far as it is visible (never "
+                "cropped into a bust or a close-up), at the same size and position -- remove nothing from it and "
+                "add nothing{except_changes}.")
+EXCEPT_CHANGES = " apart from the requested changes"
 RULES = ("Clear readable depth (near parts raised, far parts recessed), soft even frontal light, one material, "
-         "no colour, no text. Keep people and animals at the same size and framing as in the original, with "
-         "all of their visible body, arms and clothing -- never crop them into a bust. Do not add a coin, medal, "
-         "frame or border unless asked, or add or remove subjects.")
+         "no colour, no text. Do not add a coin, medal, frame or border unless asked, or add or remove subjects.")
 NEGATIVE = ("color, text, letters, watermark, signature, coin, medal, medallion, bust, frame, border, extra people, "
             "extra subjects, photograph, noise, grain, blurry, low quality, deformed, cluttered")
 
@@ -140,12 +148,13 @@ def fidelity_phrase(fidelity: float, has_changes: bool = False) -> str:
     models that have no structure-strength setting. With requested changes
     (options or the user's text) it must not forbid them, or the model keeps
     the original background etc. and ignores the request."""
-    except_changes = " apart from the requested changes" if has_changes else ""
+    except_changes = EXCEPT_CHANGES if has_changes else ""
     if fidelity >= 0.75:
         return (f"Keep the exact composition, framing, proportions and positions of everything in the "
                 f"original{except_changes}.")
     if fidelity >= 0.55:
-        return f"Keep the same overall composition and keep everything recognisable{except_changes}."
+        return (f"Keep the same overall composition (never cropped into a bust or a close-up) and keep "
+                f"everything recognisable{except_changes}.")
     return "You may reinterpret the composition creatively."
 
 
@@ -169,10 +178,22 @@ def build_relief_prompt(style_id: str, addition_ids: list[str], user_text: str =
     # editing models weigh them most
     bg = background_choice(addition_ids)
     convert = CONVERT.format(style=style.relief) + ("." if bg else ", showing exactly the same scene.")
-    parts = [convert, *adds]
+    # a background option is how the subject is shown, not a change to it
+    changes = bool(text) or any(a.group != "background" for a in resolve_additions(addition_ids))
+    except_changes = EXCEPT_CHANGES if changes else ""
+    # At "close" faithfulness, keeping everything comes first (and replaces
+    # the faithfulness sentence); lower settings use the looser wording late.
+    close = fidelity >= 0.75
+    parts = [convert]
+    if close:
+        parts.append((KEEP_SUBJECT if bg else KEEP_ALL).format(except_changes=except_changes))
+    parts += adds
     if text:
         parts.append(f"Also make this change: {text}.")
-    parts += [kind.prompt, style.detail, CASTING, fidelity_phrase(fidelity, bool(adds or text)), RULES]
+    parts += [kind.prompt, style.detail, CASTING]
+    if not close:
+        parts.append(fidelity_phrase(fidelity, bool(adds or text)))
+    parts.append(RULES)
     return " ".join(parts), NEGATIVE
 
 
