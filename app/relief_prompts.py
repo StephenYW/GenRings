@@ -101,6 +101,9 @@ IMAGE_TYPES: dict[str, ImageType] = {t.id: t for t in [
               "background -- near features raised highest, the sky and distance lowest."),
     ImageType("painting", "Painting", "It is a painting: keep its composition and every element, and turn its "
               "brushstrokes, swirls and textures into sculpted ridges and grooves."),
+    ImageType("drawing", "Drawing / cartoon", "It is a drawing or cartoon: keep its exact line work, character "
+              "design and proportions; turn its outlines into crisp raised edges and its flat colour areas into "
+              "smooth plateaus at a few clear heights."),
     ImageType("object", "Object", "It shows an object: sculpt its shape and surface details with crisp "
               "edges and correct proportions."),
     ImageType("logo", "Logo / graphic", "It is a logo or graphic: make its shapes flat raised plateaus at "
@@ -158,43 +161,62 @@ def fidelity_phrase(fidelity: float, has_changes: bool = False) -> str:
     return "You may reinterpret the composition creatively."
 
 
+def default_templates() -> dict:
+    """Every piece of text a relief prompt is built from, as plain data: the
+    prompt lab stores a copy per prompt version and edits it there (see
+    app/prompt_lab.py), so wording can be tried without changing this file."""
+    return {
+        "convert": CONVERT, "describe": DESCRIBE, "keep_all": KEEP_ALL, "keep_subject": KEEP_SUBJECT,
+        "except_changes": EXCEPT_CHANGES, "casting": CASTING, "rules": RULES, "negative": NEGATIVE,
+        "image_types": {t.id: t.prompt for t in IMAGE_TYPES.values()},
+        "styles": {s.id: {"relief": s.relief, "detail": s.detail} for s in STYLES.values()},
+        "additions": {a.id: a.prompt for a in ADDITIONS.values()},
+    }
+
+
 def build_relief_prompt(style_id: str, addition_ids: list[str], user_text: str = "",
                         instruction: bool = False, fidelity: float = 0.8,
-                        image_type: str = DEFAULT_IMAGE_TYPE) -> tuple[str, str]:
+                        image_type: str = DEFAULT_IMAGE_TYPE, templates: dict | None = None) -> tuple[str, str]:
     """(prompt, negative prompt) for one relief generation. `instruction`
     phrases it as a direct edit for instruction-following editing models
     (fal: FLUX Kontext, Qwen Image Edit, FLUX.2); otherwise it's a
-    description, for Stable Diffusion with structure control (Stability)."""
-    style = STYLES.get(style_id, STYLES[DEFAULT_STYLE])
-    kind = IMAGE_TYPES.get(image_type, IMAGE_TYPES[DEFAULT_IMAGE_TYPE])
-    adds = [a.prompt for a in resolve_additions(addition_ids)]
+    description, for Stable Diffusion with structure control (Stability).
+    `templates` replaces any of default_templates()' text (a prompt lab version)."""
+    t = default_templates()
+    for key, value in (templates or {}).items():
+        t[key] = {**t[key], **value} if isinstance(t.get(key), dict) else value
+    style_id = style_id if style_id in t["styles"] else DEFAULT_STYLE
+    style = t["styles"][style_id]
+    kind = t["image_types"].get(image_type, t["image_types"][DEFAULT_IMAGE_TYPE])
+    resolved = resolve_additions(addition_ids)
+    adds = [t["additions"].get(a.id, a.prompt) for a in resolved]
     text = user_text.strip()
     if not instruction:
-        parts = [DESCRIBE.format(style=style.relief), style.detail, kind.prompt, CASTING, *adds]
+        parts = [t["describe"].format(style=style["relief"]), style["detail"], kind, t["casting"], *adds]
         if text:
             parts.insert(1, text)
-        return " ".join(parts), NEGATIVE
+        return " ".join(parts), t["negative"]
     # the requested changes come straight after the main instruction, where
     # editing models weigh them most
     bg = background_choice(addition_ids)
-    convert = CONVERT.format(style=style.relief) + ("." if bg else ", showing exactly the same scene.")
+    convert = t["convert"].format(style=style["relief"]) + ("." if bg else ", showing exactly the same scene.")
     # a background option is how the subject is shown, not a change to it
-    changes = bool(text) or any(a.group != "background" for a in resolve_additions(addition_ids))
-    except_changes = EXCEPT_CHANGES if changes else ""
+    changes = bool(text) or any(a.group != "background" for a in resolved)
+    except_changes = t["except_changes"] if changes else ""
     # At "close" faithfulness, keeping everything comes first (and replaces
     # the faithfulness sentence); lower settings use the looser wording late.
     close = fidelity >= 0.75
     parts = [convert]
     if close:
-        parts.append((KEEP_SUBJECT if bg else KEEP_ALL).format(except_changes=except_changes))
+        parts.append((t["keep_subject"] if bg else t["keep_all"]).format(except_changes=except_changes))
     parts += adds
     if text:
         parts.append(f"Also make this change: {text}.")
-    parts += [kind.prompt, style.detail, CASTING]
+    parts += [kind, style["detail"], t["casting"]]
     if not close:
         parts.append(fidelity_phrase(fidelity, bool(adds or text)))
-    parts.append(RULES)
-    return " ".join(parts), NEGATIVE
+    parts.append(t["rules"])
+    return " ".join(p for p in parts if p), t["negative"]
 
 
 def options() -> dict:

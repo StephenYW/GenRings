@@ -14,4 +14,7 @@ static/rings/**/*.glb
 
 # AI generation usage ledger (local)
 data/usage.jsonl
+
+# Prompt lab: test images, generations and reviews (local; back up separately)
+data/prompt_lab/
 .env.backup

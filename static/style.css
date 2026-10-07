@@ -159,3 +159,6 @@ hr { border: none; border-top: 1px solid #2c2f36; margin: 4px 0; }
 .tag { font-size: 12px; padding: 2px 4px 2px 8px; border-radius: 4px; background: #2b3d6b; color: #dbe6ff; display: inline-flex; align-items: center; gap: 4px; }
 .tag.style { background: #3d2b6b; color: #e6dbff; padding-right: 8px; }
 .tag button { background: none; border: none; color: inherit; padding: 0 3px; margin: 0; font-size: 13px; line-height: 1; cursor: pointer; }
+
+.lab-link { font-size: 12px; color: #8fb0ff; text-decoration: none; margin-top: -10px; }
+.lab-link:hover { text-decoration: underline; }

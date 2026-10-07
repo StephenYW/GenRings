@@ -129,6 +129,14 @@ DATA_DIR = BASE_DIR / "data" / "designs"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR = BASE_DIR / "static"
 
+# --- Prompt lab (app/prompt_lab.py) ---------------------------------------------
+# Test images, prompt versions, runs and reviews, as plain files. Relative
+# paths are inside the project; point it elsewhere (an external drive) in .env.
+PROMPT_LAB_DIR = Path(os.path.expanduser(os.environ.get("PROMPT_LAB_DIR", "data/prompt_lab")))
+if not PROMPT_LAB_DIR.is_absolute():
+    PROMPT_LAB_DIR = BASE_DIR / PROMPT_LAB_DIR
+PROMPT_LAB_PARALLEL = int(os.environ.get("PROMPT_LAB_PARALLEL", "3"))  # generations at once during a run
+
 # --- Image generation provider ---------------------------------------------------
 IMAGE_PROVIDER = os.environ.get("IMAGE_PROVIDER", "mock").lower()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -153,6 +161,7 @@ RELIEF_PROVIDER = os.environ.get(
 # for the 4-variation requests (both Kontext [dev], ~$0.025/image, by default;
 # fal-ai/flux-pro/kontext is ~$0.04 and a little more faithful). Any of: fal-ai/flux-pro/kontext,
 # fal-ai/flux-kontext/dev, fal-ai/qwen-image-edit, fal-ai/qwen-image-edit-plus,
+# fal-ai/qwen-image-edit-2511,
 # fal-ai/flux-2/edit, fal-ai/flux-2-pro/edit.
 FAL_MODEL = os.environ.get("FAL_MODEL", "fal-ai/flux-kontext/dev")
 FAL_MODEL_VARIATIONS = os.environ.get("FAL_MODEL_VARIATIONS", "fal-ai/flux-kontext/dev")
@@ -162,6 +171,7 @@ FAL_MODEL_VARIATIONS = os.environ.get("FAL_MODEL_VARIATIONS", "fal-ai/flux-konte
 FAL_MODEL_CHOICES = [
     ("fal-ai/flux-2/edit", "FLUX.2"),
     ("fal-ai/flux-pro/kontext", "Kontext [pro]"),
+    ("fal-ai/qwen-image-edit-2511", "Qwen Edit 2511"),
 ]
 STABILITY_API_BASE = os.environ.get("STABILITY_API_BASE", "https://api.stability.ai")
 STABILITY_CREDITS_PER_IMAGE = float(os.environ.get("STABILITY_CREDITS_PER_IMAGE", "5"))  # Structure Control

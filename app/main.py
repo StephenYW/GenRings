@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from app import background, config, enhance, prompts, relief, relief_prompts, storage, textures
+from app import background, config, enhance, prompt_lab, prompts, relief, relief_prompts, storage, textures
 from app.imaging import cap_max_dimension, cover_fit_resize
 from app.processing import ProcessParams, process_image
 from app.providers import get_provider
@@ -23,6 +23,7 @@ MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 ALLOWED_UPLOAD_CONTENT_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
 
 app = FastAPI(title="Ring Face Relief Designer")
+app.include_router(prompt_lab.router)  # /api/lab/...: the prompt lab (static/lab.html)
 
 
 # --- request/response models ---------------------------------------------------

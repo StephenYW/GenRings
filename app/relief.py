@@ -6,7 +6,7 @@ Providers:
 - FalRelief (preferred): instruction-following image-editing models on fal.ai
   -- FLUX.1 Kontext [pro] for single images and the cheaper Kontext [dev] for
   the 4-variation requests by default (config.FAL_MODEL / FAL_MODEL_VARIATIONS;
-  Qwen Image Edit and FLUX.2 edit work too). The prompt is an instruction
+  Qwen Image Edit (incl. 2511) and FLUX.2 edit work too). The prompt is an instruction
   ("Transform this image into ..."), with faithfulness spelled out in words.
 - StabilityRelief: Stable Diffusion via Stability AI's Structure Control
   endpoint (POST /v2beta/stable-image/control/structure). It keeps the source
@@ -219,7 +219,7 @@ class FalRelief:
 
     def _payload(self, model: str, image: str, w: int, h: int, prompt: str, negative: str, seed: int) -> dict:
         body = {"prompt": prompt, "seed": seed, "num_images": 1, "output_format": "png"}
-        if "qwen-image-edit-plus" in model or "flux-2" in model:
+        if "qwen-image-edit-plus" in model or "qwen-image-edit-2511" in model or "flux-2" in model:
             body["image_urls"] = [image]
         else:
             body["image_url"] = image

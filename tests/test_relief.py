@@ -172,6 +172,7 @@ def _png_bytes(w=96, h=64):
     ("fal-ai/flux-pro/kontext", "image_url", False),
     ("fal-ai/flux-kontext/dev", "image_url", False),
     ("fal-ai/qwen-image-edit-plus", "image_urls", True),
+    ("fal-ai/qwen-image-edit-2511", "image_urls", True),
     ("fal-ai/flux-2/edit", "image_urls", False),
 ])
 def test_fal_request(monkeypatch, model, image_field, negative):

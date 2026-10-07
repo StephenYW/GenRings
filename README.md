@@ -413,6 +413,28 @@ report. Useful for scanned line art, logos, or photos with clear silhouettes.
   ~220px max dimension to keep face count/file size reasonable — still far finer than
   `MIN_FEATURE_MM`.
 
+## Prompt lab
+
+`/lab.html` (linked from the designer's panel) tunes the AI relief prompt on a fixed
+set of test images before any LoRA training data is made (`app/prompt_lab.py`):
+
+1. **Test images**: upload images by category (people, animals, scenery, paintings,
+   logos, drawings/cartoons, objects), each in the `tune` or `holdout` split (auto: every
+   4th held out), with where it came from and its licence.
+2. **Prompt versions**: `v1` is the app's built-in prompt. Copy a version, edit its
+   settings (model, style, options, faithfulness) and any of its prompt text, and save.
+   A version that has been run is locked, so a run always matches its version.
+3. **Runs & review**: run a version over a split/categories. Each source keeps the same
+   seed in every run, so differences come from the prompt. Each result shows the source,
+   the generation, a shaded preview of its depth and the depth map; review it with a
+   verdict (G/U/B), a 1–5 score, error tags and a comment, and compare it with another run.
+
+Everything is plain files under `PROMPT_LAB_DIR` (default `data/prompt_lab/`, git-ignored),
+described by the `README.md` the lab writes there: `sources/sources.csv`, `prompts/vN.json`,
+`runs/<run>/<source>/{generation.webp, depth.png, relief.webp, meta.json, review.json}` and
+a `summary.json` per run. A new prompt version can also be written straight to
+`prompts/vN.json` (e.g. by Claude after reading the reviews) and run from the page.
+
 ## Storage
 
 Filesystem only, `./data/designs/<uuid>/` — no database, no auth. Each candidate

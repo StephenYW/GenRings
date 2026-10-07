@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Prompt Lab</title>
+  <link rel="stylesheet" href="/lab.css?v=2" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Prompt lab</h1>
+    <nav class="tabs" role="tablist">
+      <button class="tab on" data-tab="images">Test images</button>
+      <button class="tab" data-tab="prompts">Prompt versions</button>
+      <button class="tab" data-tab="runs">Runs &amp; review</button>
+    </nav>
+    <div class="topbar-right">
+      <span id="labDir" class="muted"></span>
+      <a href="/">← Designer</a>
+    </div>
+  </header>
+
+  <!-- ===== Test images ===== -->
+  <main id="tab-images" class="tabpane">
+    <section class="card upload-card">
+      <h2>Add test images</h2>
+      <div class="form-grid">
+        <label>Category <select id="upCategory"></select></label>
+        <label>Split
+          <select id="upSplit">
+            <option value="auto">Auto (every 4th held out)</option>
+            <option value="tune">Tune</option>
+            <option value="holdout">Holdout</option>
+          </select>
+        </label>
+        <label>Origin <input id="upOrigin" placeholder="URL or 'own photo' (blank = file name)" /></label>
+        <label>Licence <input id="upLicence" placeholder="CC0, own photo, Unsplash, private test only…" /></label>
+        <label class="wide">Tags <input id="upTags" placeholder="e.g. group, low-light, side profile" /></label>
+      </div>
+      <div id="dropZone" class="dropzone">
+        <p>Drop images here, or <label class="linklike">choose files<input type="file" id="upFiles" multiple accept="image/png,image/jpeg,image/webp" hidden /></label></p>
+        <p class="muted">PNG, JPEG or WebP. They're saved exactly as uploaded.</p>
+      </div>
+      <div id="upStatus" class="status"></div>
+    </section>
+
+    <section class="card">
+      <div class="row-between">
+        <h2>Collection</h2>
+        <div id="catProgress" class="chips"></div>
+      </div>
+      <div class="row filter-row">
+        <select id="srcFilterCat"><option value="">All categories</option></select>
+        <select id="srcFilterSplit"><option value="">Both splits</option><option value="tune">Tune</option><option value="holdout">Holdout</option></select>
+      </div>
+      <div id="srcGrid" class="grid"></div>
+    </section>
+
+    <aside id="srcEditor" class="drawer" hidden>
+      <div class="row-between"><h2 id="srcEdTitle"></h2><button class="ghost" id="srcEdClose">✕</button></div>
+      <img id="srcEdImg" alt="" />
+      <label>Split <select id="srcEdSplit"><option value="tune">Tune</option><option value="holdout">Holdout</option></select></label>
+      <label>Origin <input id="srcEdOrigin" /></label>
+      <label>Licence <input id="srcEdLicence" /></label>
+      <label>Tags <input id="srcEdTags" /></label>
+      <label>Notes <textarea id="srcEdNotes" rows="3"></textarea></label>
+      <div class="row">
+        <button id="srcEdSave">Save</button>
+        <button id="srcEdDelete" class="danger">Delete image</button>
+      </div>
+      <div id="srcEdStatus" class="status"></div>
+    </aside>
+  </main>
+
+  <!-- ===== Prompt versions ===== -->
+  <main id="tab-prompts" class="tabpane" hidden>
+    <div class="split-layout">
+      <section class="card version-list">
+        <h2>Versions</h2>
+        <div id="versionList"></div>
+      </section>
+      <section class="card version-editor">
+        <div class="row-between">
+          <h2 id="verTitle"></h2>
+          <div class="row">
+            <span id="verLock" class="badge" hidden>Locked: has runs</span>
+            <button id="verNew" class="secondary">New version from this</button>
+            <button id="verSave">Save</button>
+          </div>
+        </div>
+        <div id="verStatus" class="status"></div>
+        <label>Notes: what changed and why <textarea id="verNotes" rows="2"></textarea></label>
+
+        <h3>Settings</h3>
+        <div class="form-grid">
+          <label>Model <select id="verModel"></select></label>
+          <label>Style <select id="verStyle"></select></label>
+          <label>Faithfulness <input id="verFidelity" type="number" min="0" max="1" step="0.05" /></label>
+        </div>
+        <label>Options (background, shading, border…)</label>
+        <div id="verAdditions" class="chips"></div>
+
+        <h3>Prompt text</h3>
+        <p class="muted">Placeholders: <code>{style}</code> in the main instruction, <code>{except_changes}</code> in the keep sentences.</p>
+        <div id="verTemplates"></div>
+
+        <details>
+          <summary>Category sentences</summary>
+          <div id="verImageTypes"></div>
+        </details>
+        <details>
+          <summary>Style wording</summary>
+          <div id="verStyles"></div>
+        </details>
+        <details>
+          <summary>Option wording</summary>
+          <div id="verAddText"></div>
+        </details>
+        <details open>
+          <summary>Full prompt per category (as last saved)</summary>
+          <div id="verExamples"></div>
+        </details>
+      </section>
+    </div>
+  </main>
+
+  <!-- ===== Runs & review ===== -->
+  <main id="tab-runs" class="tabpane" hidden>
+    <section class="card">
+      <h2>New run</h2>
+      <div class="form-grid">
+        <label>Prompt version <select id="runVersion"></select></label>
+        <label>Split
+          <select id="runSplit">
+            <option value="tune">Tune</option>
+            <option value="holdout">Holdout</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <label class="wide">Notes <input id="runNotes" placeholder="optional" /></label>
+      </div>
+      <label>Categories (none ticked = all)</label>
+      <div id="runCats" class="chips"></div>
+      <div class="row">
+        <button id="runStart">Start run</button>
+        <span id="runEstimate" class="muted"></span>
+      </div>
+      <div id="runStatus" class="status"></div>
+    </section>
+
+    <section class="card">
+      <h2>Runs</h2>
+      <table id="runTable" class="table">
+        <thead><tr><th>Run</th><th>Version</th><th>Made</th><th>Reviewed</th><th>Good / usable / bad</th><th>Avg score</th><th>Cost</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="review" class="card" hidden>
+      <div class="row-between">
+        <h2 id="revTitle"></h2>
+        <div class="row">
+          <button id="revStop" class="secondary" hidden>Stop</button>
+          <button id="revResume" class="secondary" hidden>Make missing / failed</button>
+        </div>
+      </div>
+      <div class="progress"><div id="revProgress"></div></div>
+      <div id="revSummary" class="muted"></div>
+      <div class="row filter-row">
+        <select id="revFilter">
+          <option value="">All results</option>
+          <option value="unreviewed">Not reviewed</option>
+          <option value="good">Good</option>
+          <option value="usable">Usable</option>
+          <option value="bad">Bad</option>
+          <option value="failed">Failed</option>
+        </select>
+        <select id="revCat"><option value="">All categories</option></select>
+        <label class="inline">Compare with <select id="revCompare"><option value="">—</option></select></label>
+      </div>
+      <div id="revStrip" class="strip"></div>
+
+      <div id="revItem" class="rev-item" hidden>
+        <div class="row-between">
+          <h3 id="revItemTitle"></h3>
+          <span class="muted keys">← → move · G U B verdict · 1–5 score · N next unreviewed</span>
+        </div>
+        <div id="revImages" class="rev-images"></div>
+        <div id="revCompareRow" class="rev-images compare" hidden></div>
+        <div class="rev-form">
+          <div class="row">
+            <div class="seg" id="revVerdict">
+              <button data-v="good" class="v-good">Good <kbd>G</kbd></button>
+              <button data-v="usable" class="v-usable">Usable <kbd>U</kbd></button>
+              <button data-v="bad" class="v-bad">Bad <kbd>B</kbd></button>
+            </div>
+            <div class="seg" id="revScore">
+              <button data-s="1">1</button><button data-s="2">2</button><button data-s="3">3</button><button data-s="4">4</button><button data-s="5">5</button>
+            </div>
+            <span id="revSaved" class="muted"></span>
+          </div>
+          <div id="revTags"></div>
+          <div class="row add-tag">
+            <select id="revNewTagGroup"></select>
+            <input id="revNewTag" placeholder="New error tag" />
+            <button id="revAddTag" class="secondary">Add tag</button>
+          </div>
+          <textarea id="revComment" rows="3" placeholder="What's wrong (or right) with it? Esc to leave the box."></textarea>
+          <details>
+            <summary>Prompt used</summary>
+            <pre id="revPrompt"></pre>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="lightbox" hidden><img alt="" /></div>
+
+  <script type="module" src="/lab.js?v=2"></script>
+</body>
+</html>
